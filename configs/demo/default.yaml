@@ -1,0 +1,30 @@
+# Default configuration for DINOv3 feature extraction
+
+model:
+  dino_hub: null  # "dinov3_vitb16"  # Available: dinov3_vits16, dinov3_vitb16, dinov3_vitl16, dinov3_vith16plus, dinov3_vit7b16
+  config_file: null
+  pretrained_weights: null
+  local_model_path: "/nas/qirui/dinov3_weights/vit7b16"  # Path to local model
+
+image:
+  resize_size: 448
+  crop_size: 448
+  mean: [0.485, 0.456, 0.406]  # ImageNet mean
+  std: [0.229, 0.224, 0.225]   # ImageNet std
+
+feature:
+  layers: [-1]  # Which layers to extract from (-1 means last layer, can be multiple like [-1, -2, -3])
+  use_cls_token: true
+  normalize: true
+  patch_features: true  # Extract patch-level features
+
+extraction:
+  input_path: "/nas/qirui/sam3/scenefun3d_ex/src/memory_semantic/door-handle/1cc67b7b-a548-46ec-acb3-3d007ab4b161/visualization/vis_frame_000006__ts_73224p626.jpg"  # Input image or directory
+  output_path: "/nas/qirui/dinov3/outputs/demo/demo_features"  # Output directory
+  batch_size: 8
+  device: "cuda"  # cuda or cpu (auto-detected if cuda not available)
+  save_format: "npz"  # npz or pt
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR

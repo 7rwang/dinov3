@@ -1,0 +1,26 @@
+# Configuration for large DINOv3 model
+
+model:
+  dino_hub: "dinov3_vitl16"  # Large model
+
+image:
+  resize_size: 224
+  crop_size: 224
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+feature:
+  layers: [-1, -2, -3]  # Extract from multiple layers
+  use_cls_token: true
+  normalize: true
+  patch_features: true
+
+extraction:
+  input_path: "demo_image.jpg"
+  output_path: "demo_features_large"
+  batch_size: 4  # Smaller batch size for large model
+  device: "cuda"
+  save_format: "npz"
+
+logging:
+  level: "INFO"
