@@ -1,5 +1,8 @@
 # Configuration for large DINOv3 model
 
+experiment:
+  name: large_model
+
 model:
   dino_hub: "dinov3_vitl16"  # Large model
 
@@ -17,10 +20,16 @@ feature:
 
 extraction:
   input_path: "demo_image.jpg"
-  output_path: "demo_features_large"
+  output_path: "${hydra:runtime.output_dir}/features"
   batch_size: 4  # Smaller batch size for large model
   device: "cuda"
   save_format: "npz"
 
 logging:
   level: "INFO"
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/demo/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,4 +1,5 @@
 ftfy
+hydra-core
 omegaconf
 regex
 scikit-learn

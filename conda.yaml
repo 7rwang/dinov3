@@ -8,6 +8,7 @@ dependencies:
   - pip
   - pip:
     - ftfy # needed for dino.txt
+    - hydra-core
     - iopath
     - omegaconf
     - pandas 

@@ -1,5 +1,8 @@
 # Default configuration for DINOv3 feature extraction
 
+experiment:
+  name: demo
+
 model:
   dino_hub: null  # "dinov3_vitb16"  # Available: dinov3_vits16, dinov3_vitb16, dinov3_vitl16, dinov3_vith16plus, dinov3_vit7b16
   config_file: null
@@ -20,7 +23,7 @@ feature:
 
 extraction:
   input_path: "/nas/qirui/sam3/scenefun3d_ex/src/memory_semantic/door-handle/1cc67b7b-a548-46ec-acb3-3d007ab4b161/visualization/vis_frame_000006__ts_73224p626.jpg"  # Input image or directory
-  output_path: "/nas/qirui/dinov3/outputs/demo/demo_features"  # Output directory
+  output_path: "${hydra:runtime.output_dir}/features"  # Output directory
   batch_size: 8
   device: "cuda"  # cuda or cpu (auto-detected if cuda not available)
   save_format: "npz"  # npz or pt
@@ -28,3 +31,9 @@ extraction:
 # Logging
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/demo/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}

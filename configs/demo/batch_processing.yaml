@@ -1,5 +1,8 @@
 # Configuration for batch processing multiple images
 
+experiment:
+  name: batch_processing
+
 model:
   dino_hub: "dinov3_vitb16"
 
@@ -17,10 +20,16 @@ feature:
 
 extraction:
   input_path: "input_images/"  # Directory containing multiple images
-  output_path: "batch_features"
+  output_path: "${hydra:runtime.output_dir}/features"
   batch_size: 16  # Larger batch size for efficiency
   device: "cuda"
   save_format: "npz"
 
 logging:
   level: "INFO"
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/demo/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}

@@ -4,18 +4,17 @@
 # This software may be used and distributed in accordance with
 # the terms of the DINOv3 License Agreement.
 
-import argparse
 import logging
-import os
 import sys
-import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
+import hydra
 import numpy as np
 import torch
 import torch.nn.functional as F
+from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from torchvision.transforms import v2
 
@@ -294,11 +293,10 @@ class FeatureExtractor:
             raise ValueError(f"Unsupported save format: {self.config.save_format}")
 
 
-def load_config(config_path: str) -> ExtractionConfig:
-    """Load configuration from YAML file"""
-    with open(config_path, 'r') as f:
-        cfg_dict = yaml.safe_load(f)
-    
+def build_config(cfg: DictConfig) -> ExtractionConfig:
+    """Build runtime dataclasses from a Hydra config."""
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+
     # Convert nested dict to dataclass
     model_config = ModelConfig(**cfg_dict['model'])
     image_config = ImageConfig(**cfg_dict['image'])
@@ -315,47 +313,28 @@ def load_config(config_path: str) -> ExtractionConfig:
     return ExtractionConfig(**extraction_dict)
 
 
-def main():
+@hydra.main(version_base=None, config_path="../configs/demo", config_name="default")
+def main(cfg: DictConfig):
     """Main feature extraction pipeline"""
     # Configure logging
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, cfg.get("logging", {}).get("level", "INFO")),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
-    parser = argparse.ArgumentParser(description="DINOv3 Feature Extraction")
-    parser.add_argument("--config", "-c", type=str, default="configs/demo/default.yaml",
-                       help="Path to configuration file")
-    parser.add_argument("--input", "-i", type=str, help="Override input path")
-    parser.add_argument("--output", "-o", type=str, help="Override output path")
-    parser.add_argument("--device", type=str, choices=["cuda", "cpu"], 
-                       help="Override device")
-    parser.add_argument("--batch-size", type=int, help="Override batch size")
-    
-    args = parser.parse_args()
-    
+
     try:
-        # Load configuration
-        config = load_config(args.config)
+        config = build_config(cfg)
     except Exception as e:
         print(f"Error loading config: {e}")
         return
-    
-    # Override with command line arguments
-    if args.input:
-        config.input_path = args.input
-    if args.output:
-        config.output_path = args.output
-    if args.device:
-        config.device = args.device
-    elif config.device == "cuda" and not torch.cuda.is_available():
+
+    if config.device == "cuda" and not torch.cuda.is_available():
         config.device = "cpu"
         print("CUDA not available, using CPU")
-    if args.batch_size:
-        config.batch_size = args.batch_size
     
     try:
         logger.info("Starting feature extraction...")
+        logger.info(f"Experiment: {cfg.get('experiment', {}).get('name', 'default')}")
         logger.info(f"Input: {config.input_path}")
         logger.info(f"Output: {config.output_path}")
         logger.info(f"Model: {config.model.dino_hub or config.model.local_model_path or config.model.config_file}")
