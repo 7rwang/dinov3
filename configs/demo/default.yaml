@@ -21,6 +21,15 @@ feature:
   normalize: true
   patch_features: true  # Extract patch-level features
 
+visualization:
+  enabled: true
+  patch_features: true
+  global_features: false
+  compare: false
+  method: "pca"
+  output_size: [224, 224]
+  save_dir: "${hydra:runtime.output_dir}/visualizations"
+
 extraction:
   input_path: "/nas/qirui/sam3/scenefun3d_ex/src/memory_semantic/door-handle/1cc67b7b-a548-46ec-acb3-3d007ab4b161/visualization/vis_frame_000006__ts_73224p626.jpg"  # Input image or directory
   output_path: "${hydra:runtime.output_dir}/features"  # Output directory

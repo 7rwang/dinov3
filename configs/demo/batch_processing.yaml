@@ -18,6 +18,15 @@ feature:
   normalize: true
   patch_features: true
 
+visualization:
+  enabled: true
+  patch_features: true
+  global_features: false
+  compare: false
+  method: "pca"
+  output_size: [224, 224]
+  save_dir: "${hydra:runtime.output_dir}/visualizations"
+
 extraction:
   input_path: "input_images/"  # Directory containing multiple images
   output_path: "${hydra:runtime.output_dir}/features"

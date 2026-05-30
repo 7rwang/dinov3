@@ -10,12 +10,14 @@ dependencies:
     - ftfy # needed for dino.txt
     - hydra-core
     - iopath
+    - matplotlib
     - omegaconf
     - pandas 
     - regex # needed for dino.txt
     - pandas
     - scikit-learn
     - scikit-learn-intelex
+    - scipy
     - submitit
     - termcolor
     - torch 

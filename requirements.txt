@@ -1,8 +1,10 @@
 ftfy
 hydra-core
+matplotlib
 omegaconf
 regex
 scikit-learn
+scipy
 submitit
 termcolor
 torch

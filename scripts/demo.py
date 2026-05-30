@@ -44,6 +44,18 @@ class FeatureConfig:
 
 
 @dataclass
+class VisualizationConfig:
+    """Feature visualization configuration"""
+    enabled: bool = True
+    patch_features: bool = True
+    global_features: bool = False
+    compare: bool = False
+    method: str = "pca"
+    output_size: List[int] = field(default_factory=lambda: [224, 224])
+    save_dir: str = "visualizations"
+
+
+@dataclass
 class ModelConfig:
     """Model configuration"""
     dino_hub: Optional[str] = None  # DINOv3 model name from torch.hub
@@ -58,6 +70,7 @@ class ExtractionConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     image: ImageConfig = field(default_factory=ImageConfig)
     feature: FeatureConfig = field(default_factory=FeatureConfig)
+    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     input_path: str = "input_images"  # Input image path or directory
     output_path: str = "features"  # Output directory for features
     batch_size: int = 8  # Batch size for processing multiple images
@@ -148,6 +161,37 @@ class FeatureExtractor:
 
         patch_tokens = hidden_state[:, 1 + num_extra_tokens:]
         return cls_token, patch_tokens
+
+    def _extract_transformers_features(self, images: torch.Tensor) -> dict:
+        """Extract configured layers from a HuggingFace DINOv3 model."""
+        with torch.autocast(device_type=self.device.type, dtype=self.model_context['autocast_dtype']):
+            outputs = self.model(images, output_hidden_states=True)
+
+        if not hasattr(outputs, "hidden_states") or outputs.hidden_states is None:
+            raise ValueError("Transformer model did not return hidden_states")
+
+        features = {}
+        for layer_idx in self.config.feature.layers:
+            hidden_state = outputs.hidden_states[layer_idx]
+            cls_token, patch_tokens = self._split_transformers_tokens(hidden_state, images)
+
+            if self.config.feature.patch_features:
+                features[f'patch_features_layer_{layer_idx}'] = patch_tokens.cpu()
+
+            if self.config.feature.use_cls_token:
+                global_features = cls_token
+            else:
+                global_features = patch_tokens.mean(dim=1)
+
+            if self.config.feature.normalize:
+                global_features = F.normalize(global_features, p=2, dim=1)
+
+            global_key = f'global_features_layer_{layer_idx}'
+            features[global_key] = global_features.cpu()
+            if layer_idx == -1:
+                features['global_features'] = global_features.cpu()
+
+        return features
     
     @torch.no_grad()
     def extract_features(self, images: torch.Tensor) -> dict:
@@ -184,38 +228,20 @@ class FeatureExtractor:
         
         else:
             # Extract global features only (works for both torch.hub and transformers)
-            with torch.autocast(device_type=self.device.type, dtype=self.model_context['autocast_dtype']):
-                if hasattr(self.model, 'forward_features'):
+            if hasattr(self.model, 'forward_features'):
+                with torch.autocast(device_type=self.device.type, dtype=self.model_context['autocast_dtype']):
                     # torch.hub version
                     global_features = self.model.forward_features(images)
                     if hasattr(global_features, 'shape') and len(global_features.shape) > 2:
                         # If it returns patch features, take the mean
                         global_features = global_features.mean(dim=1)
-                else:
-                    # transformers version
-                    outputs = self.model(images, output_hidden_states=True)
-                    if hasattr(outputs, 'last_hidden_state'):
-                        cls_token, patch_tokens = self._split_transformers_tokens(outputs.last_hidden_state, images)
-                        if self.config.feature.use_cls_token:
-                            global_features = cls_token
-                        else:
-                            global_features = patch_tokens.mean(dim=1)
-                    else:
-                        global_features = outputs
-            
-            if self.config.feature.normalize:
-                global_features = F.normalize(global_features, p=2, dim=1)
-            
-            features['global_features'] = global_features.cpu()
-            
-            # For transformers version, extract patch features if requested
-            if self.config.feature.patch_features and not has_intermediate_layers:
-                with torch.autocast(device_type=self.device.type, dtype=self.model_context['autocast_dtype']):
-                    outputs = self.model(images, output_hidden_states=True)
-                    if hasattr(outputs, 'last_hidden_state'):
-                        # Remove CLS and DINOv3 storage/register tokens.
-                        _, patch_features = self._split_transformers_tokens(outputs.last_hidden_state, images)
-                        features['patch_features_layer_-1'] = patch_features.cpu()
+
+                if self.config.feature.normalize:
+                    global_features = F.normalize(global_features, p=2, dim=1)
+
+                features['global_features'] = global_features.cpu()
+            else:
+                features.update(self._extract_transformers_features(images))
         
         return features
     
@@ -301,16 +327,60 @@ def build_config(cfg: DictConfig) -> ExtractionConfig:
     model_config = ModelConfig(**cfg_dict['model'])
     image_config = ImageConfig(**cfg_dict['image'])
     feature_config = FeatureConfig(**cfg_dict['feature'])
+    visualization_config = VisualizationConfig(**cfg_dict.get('visualization', {}))
     
     # Merge extraction config
     extraction_dict = cfg_dict['extraction'].copy()
     extraction_dict.update({
         'model': model_config,
         'image': image_config, 
-        'feature': feature_config
+        'feature': feature_config,
+        'visualization': visualization_config,
     })
     
     return ExtractionConfig(**extraction_dict)
+
+
+def run_visualizations(feature_dir: Union[str, Path], config: VisualizationConfig) -> None:
+    """Run configured visualizations for saved features."""
+    if not config.enabled:
+        return
+
+    from visualize_features import FeatureVisualizer
+
+    feature_dir = Path(feature_dir)
+    save_dir = Path(config.save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    visualizer = FeatureVisualizer(feature_dir)
+    visualizer.print_summary()
+
+    output_size = tuple(config.output_size)
+    if config.patch_features:
+        for feature_key in sorted(k for k in visualizer.features if k.startswith("patch_features")):
+            save_path = save_dir / f"{feature_key}.png"
+            visualizer.visualize_patch_features(
+                feature_key=feature_key,
+                method=config.method,
+                output_size=output_size,
+                save_path=save_path,
+            )
+
+    if config.global_features:
+        for feature_key in sorted(k for k in visualizer.features if k.startswith("global_features")):
+            save_path = save_dir / f"{feature_key}.png"
+            visualizer.visualize_global_features(
+                feature_key=feature_key,
+                method=config.method,
+                save_path=save_path,
+            )
+
+    if config.compare:
+        save_path = save_dir / "feature_comparison.png"
+        visualizer.compare_features(
+            feature_keys=list(visualizer.features.keys()),
+            save_path=save_path,
+        )
 
 
 @hydra.main(version_base=None, config_path="../configs/demo", config_name="default")
@@ -363,6 +433,7 @@ def main(cfg: DictConfig):
         
         # Save features
         extractor.save_features(features, output_path)
+        run_visualizations(output_path, config.visualization)
         logger.info("Feature extraction completed!")
         
         # Print summary
