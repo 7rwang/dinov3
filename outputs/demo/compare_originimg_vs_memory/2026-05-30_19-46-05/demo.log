@@ -1,0 +1,13 @@
+[2026-05-30 19:46:07,048][__main__][INFO] - Starting feature extraction...
+[2026-05-30 19:46:07,048][__main__][INFO] - Experiment: compare_originimg_vs_memory
+[2026-05-30 19:46:07,048][__main__][INFO] - Input: /nas/qirui/dinov3/src/437450/43828154_73224.626.jpg
+[2026-05-30 19:46:07,048][__main__][INFO] - Output: /nas/qirui/dinov3/outputs/demo/compare_originimg_vs_memory/2026-05-30_19-46-05/features
+[2026-05-30 19:46:07,048][__main__][INFO] - Model: /nas/qirui/dinov3_weights/vit7b16
+[2026-05-30 19:46:16,327][__main__][INFO] - Loaded model on device: cuda
+[2026-05-30 19:46:16,327][__main__][INFO] - Model type: DINOv3ViTModel
+[2026-05-30 19:46:16,327][__main__][INFO] - Processing single image...
+[2026-05-30 19:46:17,388][__main__][INFO] - Saved global_features to /nas/qirui/dinov3/outputs/demo/compare_originimg_vs_memory/2026-05-30_19-46-05/features/43828154_73224.626/global_features.npy
+[2026-05-30 19:46:17,411][__main__][INFO] - Saved patch_features_layer_-1 to /nas/qirui/dinov3/outputs/demo/compare_originimg_vs_memory/2026-05-30_19-46-05/features/43828154_73224.626/patch_features_layer_-1.npy
+[2026-05-30 19:46:17,411][__main__][INFO] - Feature extraction completed!
+[2026-05-30 19:46:17,411][__main__][INFO] - Extracted global_features with shape torch.Size([4096])
+[2026-05-30 19:46:17,411][__main__][INFO] - Extracted patch_features_layer_-1 with shape torch.Size([784, 4096])
