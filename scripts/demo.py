@@ -126,6 +126,29 @@ class FeatureExtractor:
         
         logger.info(f"Loaded model on device: {self.device}")
         logger.info(f"Model type: {type(self.model).__name__}")
+
+    def _split_transformers_tokens(self, hidden_state: torch.Tensor, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Split HuggingFace DINOv3 output into CLS and patch tokens."""
+        cls_token = hidden_state[:, 0]
+
+        patch_size = getattr(getattr(self.model, "config", None), "patch_size", None)
+        if patch_size is None:
+            patch_size = getattr(self.model, "patch_size", None)
+        if patch_size is None:
+            raise ValueError("Cannot infer patch_size for transformer model output")
+
+        h_patches = images.shape[-2] // int(patch_size)
+        w_patches = images.shape[-1] // int(patch_size)
+        num_patch_tokens = h_patches * w_patches
+        num_extra_tokens = hidden_state.shape[1] - 1 - num_patch_tokens
+        if num_extra_tokens < 0:
+            raise ValueError(
+                f"Model returned {hidden_state.shape[1]} tokens, fewer than expected "
+                f"1 CLS + {num_patch_tokens} patch tokens"
+            )
+
+        patch_tokens = hidden_state[:, 1 + num_extra_tokens:]
+        return cls_token, patch_tokens
     
     @torch.no_grad()
     def extract_features(self, images: torch.Tensor) -> dict:
@@ -173,11 +196,11 @@ class FeatureExtractor:
                     # transformers version
                     outputs = self.model(images, output_hidden_states=True)
                     if hasattr(outputs, 'last_hidden_state'):
-                        # Take CLS token (first token) or mean pool
+                        cls_token, patch_tokens = self._split_transformers_tokens(outputs.last_hidden_state, images)
                         if self.config.feature.use_cls_token:
-                            global_features = outputs.last_hidden_state[:, 0]  # CLS token
+                            global_features = cls_token
                         else:
-                            global_features = outputs.last_hidden_state.mean(dim=1)  # Mean pooling
+                            global_features = patch_tokens.mean(dim=1)
                     else:
                         global_features = outputs
             
@@ -191,8 +214,8 @@ class FeatureExtractor:
                 with torch.autocast(device_type=self.device.type, dtype=self.model_context['autocast_dtype']):
                     outputs = self.model(images, output_hidden_states=True)
                     if hasattr(outputs, 'last_hidden_state'):
-                        # Remove CLS token and get patch features
-                        patch_features = outputs.last_hidden_state[:, 1:]  # Skip CLS token
+                        # Remove CLS and DINOv3 storage/register tokens.
+                        _, patch_features = self._split_transformers_tokens(outputs.last_hidden_state, images)
                         features['patch_features_layer_-1'] = patch_features.cpu()
         
         return features
