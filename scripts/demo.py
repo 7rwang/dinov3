@@ -334,7 +334,7 @@ def main(cfg: DictConfig):
     
     try:
         logger.info("Starting feature extraction...")
-        logger.info(f"Experiment: {cfg.get('experiment', {}).get('name', 'default')}")
+        logger.info(f"Experiment: {cfg.get('exp', {}).get('name', 'default')}")
         logger.info(f"Input: {config.input_path}")
         logger.info(f"Output: {config.output_path}")
         logger.info(f"Model: {config.model.dino_hub or config.model.local_model_path or config.model.config_file}")

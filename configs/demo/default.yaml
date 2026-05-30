@@ -1,6 +1,6 @@
 # Default configuration for DINOv3 feature extraction
 
-experiment:
+exp:
   name: demo
 
 model:
@@ -36,4 +36,4 @@ hydra:
   job:
     chdir: false
   run:
-    dir: outputs/demo/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/demo/${exp.name}/${now:%Y-%m-%d_%H-%M-%S}

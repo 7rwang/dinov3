@@ -1,6 +1,6 @@
 # Configuration for large DINOv3 model
 
-experiment:
+exp:
   name: large_model
 
 model:
@@ -32,4 +32,4 @@ hydra:
   job:
     chdir: false
   run:
-    dir: outputs/demo/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/demo/${exp.name}/${now:%Y-%m-%d_%H-%M-%S}
