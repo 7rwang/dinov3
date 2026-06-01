@@ -26,6 +26,7 @@ visualization:
   patch_features: true
   global_features: false
   compare: false
+  save_individual: true
   method: "pca"
   output_size: [224, 224]
   save_dir: "${hydra:runtime.output_dir}/visualizations"

@@ -51,7 +51,8 @@ class FeatureVisualizer:
                                 image_name: Optional[str] = None,
                                 method: str = "pca",
                                 output_size: Tuple[int, int] = (224, 224),
-                                save_path: Optional[str] = None):
+                                save_path: Optional[str] = None,
+                                save_individual: bool = False):
         """Visualize patch features as RGB pseudocolor map following DINOv3 visualization"""
         
         if feature_key not in self.features:
@@ -166,6 +167,14 @@ class FeatureVisualizer:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"Saved visualization to {save_path}")
+            if save_individual:
+                save_dir = Path(save_path).parent
+                save_stem = Path(save_path).stem
+
+                plt.imsave(save_dir / f"{save_stem}_patch_rgb.png", features_rgb_norm)
+                plt.imsave(save_dir / f"{save_stem}_resized_rgb.png", features_resized)
+                plt.imsave(save_dir / f"{save_stem}_magnitude.png", feature_norms_resized, cmap='viridis')
+                print(f"Saved individual visualizations to {save_dir}")
         else:
             plt.show()
         
@@ -467,6 +476,8 @@ def main():
                        help="Dimensionality reduction method")
     parser.add_argument("--image-name", type=str, help="Specific image name to visualize")
     parser.add_argument("--save-dir", type=str, help="Directory to save visualizations")
+    parser.add_argument("--save-individual", action="store_true",
+                       help="Also save patch RGB, resized RGB, and magnitude maps as separate PNG files")
     
     args = parser.parse_args()
     
@@ -486,7 +497,8 @@ def main():
         visualizer.visualize_patch_features(
             method=args.method,
             image_name=args.image_name,
-            save_path=save_path
+            save_path=save_path,
+            save_individual=args.save_individual,
         )
     
     # Visualize global features

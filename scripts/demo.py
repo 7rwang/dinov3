@@ -50,6 +50,7 @@ class VisualizationConfig:
     patch_features: bool = True
     global_features: bool = False
     compare: bool = False
+    save_individual: bool = True
     method: str = "pca"
     output_size: List[int] = field(default_factory=lambda: [224, 224])
     save_dir: str = "visualizations"
@@ -364,6 +365,7 @@ def run_visualizations(feature_dir: Union[str, Path], config: VisualizationConfi
                 method=config.method,
                 output_size=output_size,
                 save_path=save_path,
+                save_individual=config.save_individual,
             )
 
     if config.global_features:
