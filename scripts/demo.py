@@ -8,7 +8,7 @@ import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import hydra
 import numpy as np
@@ -52,7 +52,7 @@ class VisualizationConfig:
     compare: bool = False
     save_individual: bool = True
     method: str = "pca"
-    output_size: List[int] = field(default_factory=lambda: [224, 224])
+    output_size: Union[List[int], str] = "input"
     save_dir: str = "visualizations"
 
 
@@ -342,7 +342,33 @@ def build_config(cfg: DictConfig) -> ExtractionConfig:
     return ExtractionConfig(**extraction_dict)
 
 
-def run_visualizations(feature_dir: Union[str, Path], config: VisualizationConfig) -> None:
+def resolve_visualization_output_size(
+    output_size: Union[List[int], str],
+    input_path: Union[str, Path],
+) -> Tuple[int, int]:
+    """Resolve visualization output size as (height, width)."""
+    if isinstance(output_size, str):
+        if output_size not in {"input", "original"}:
+            raise ValueError("visualization.output_size must be [height, width], 'input', or 'original'")
+
+        input_path = Path(input_path)
+        if not input_path.is_file():
+            raise ValueError("visualization.output_size='input' is only supported for single-image inputs")
+
+        with Image.open(input_path) as image:
+            width, height = image.size
+        return height, width
+
+    if len(output_size) != 2:
+        raise ValueError("visualization.output_size must contain exactly two values: [height, width]")
+    return int(output_size[0]), int(output_size[1])
+
+
+def run_visualizations(
+    feature_dir: Union[str, Path],
+    config: VisualizationConfig,
+    input_path: Union[str, Path],
+) -> None:
     """Run configured visualizations for saved features."""
     if not config.enabled:
         return
@@ -356,7 +382,7 @@ def run_visualizations(feature_dir: Union[str, Path], config: VisualizationConfi
     visualizer = FeatureVisualizer(feature_dir)
     visualizer.print_summary()
 
-    output_size = tuple(config.output_size)
+    output_size = resolve_visualization_output_size(config.output_size, input_path)
     if config.patch_features:
         for feature_key in sorted(k for k in visualizer.features if k.startswith("patch_features")):
             save_path = save_dir / f"{feature_key}.png"
@@ -435,7 +461,7 @@ def main(cfg: DictConfig):
         
         # Save features
         extractor.save_features(features, output_path)
-        run_visualizations(output_path, config.visualization)
+        run_visualizations(output_path, config.visualization, input_path)
         logger.info("Feature extraction completed!")
         
         # Print summary

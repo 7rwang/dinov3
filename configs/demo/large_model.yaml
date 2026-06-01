@@ -25,7 +25,7 @@ visualization:
   compare: false
   save_individual: true
   method: "pca"
-  output_size: [224, 224]
+  output_size: "input"
   save_dir: "${hydra:runtime.output_dir}/visualizations"
 
 extraction:
