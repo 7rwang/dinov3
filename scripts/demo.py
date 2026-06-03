@@ -432,6 +432,7 @@ def main(cfg: DictConfig):
     
     try:
         logger.info("Starting feature extraction...")
+        logger.info(f"Scene: {cfg.get('scene', {}).get('id', 'default_scene')}")
         logger.info(f"Experiment: {cfg.get('exp', {}).get('name', 'default')}")
         logger.info(f"Input: {config.input_path}")
         logger.info(f"Output: {config.output_path}")

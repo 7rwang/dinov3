@@ -3,6 +3,9 @@
 exp:
   name: large_model
 
+scene:
+  id: default_scene
+
 model:
   dino_hub: "dinov3_vitl16"  # Large model
 
@@ -42,4 +45,4 @@ hydra:
   job:
     chdir: false
   run:
-    dir: outputs/demo/${exp.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/demo/${scene.id}/${exp.name}/${now:%Y-%m-%d_%H-%M-%S}
