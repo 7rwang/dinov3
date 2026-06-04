@@ -1,4 +1,5 @@
 ftfy
+gradio
 hydra-core
 matplotlib
 omegaconf
