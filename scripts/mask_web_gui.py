@@ -10,10 +10,13 @@ from typing import Any, Optional, Tuple
 
 import gradio as gr
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
-def load_image(image_path: str, output_path: str) -> tuple[Image.Image, str, Optional[Image.Image]]:
+def load_image(
+    image_path: str,
+    output_path: str,
+) -> tuple[Image.Image, Image.Image, str, Optional[Image.Image], list[tuple[int, int]], str]:
     """Load an image from a server path for interactive mask drawing."""
     path = Path(image_path).expanduser()
     if not path.is_file():
@@ -23,7 +26,7 @@ def load_image(image_path: str, output_path: str) -> tuple[Image.Image, str, Opt
     if not output_path:
         output_path = str(path.with_name(f"{path.stem}_mask.png"))
 
-    return image, output_path, None
+    return image, image, output_path, None, [], "Loaded image. Draw a mask or click two bbox corners."
 
 
 def pil_or_array_to_rgba(layer: Any, size: Tuple[int, int]) -> Optional[np.ndarray]:
@@ -110,14 +113,122 @@ def save_mask(editor_value: Any, output_path: str, threshold: int) -> tuple[str,
     return f"Saved binary mask to {output}", mask_image
 
 
-def clear_mask(image_path: str) -> tuple[Optional[Image.Image], Optional[Image.Image], str]:
-    """Reload the current image and clear the mask preview."""
-    if not image_path:
-        return None, None, ""
+def parse_select_index(index: Any) -> tuple[int, int]:
+    """Parse Gradio image select index as integer x/y coordinates."""
+    if isinstance(index, dict):
+        x = index.get("x")
+        y = index.get("y")
+        if x is None or y is None:
+            raise gr.Error(f"Unsupported selection index: {index}")
+        return int(round(x)), int(round(y))
+
+    if isinstance(index, (tuple, list)) and len(index) >= 2:
+        return int(round(index[0])), int(round(index[1]))
+
+    raise gr.Error(f"Unsupported selection index: {index}")
+
+
+def make_bbox_mask(size: Tuple[int, int], points: list[tuple[int, int]]) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """Create a binary rectangular mask from two corner points."""
+    if len(points) < 2:
+        raise gr.Error("Click two points on the bbox image first.")
+
+    width, height = size
+    (x1, y1), (x2, y2) = points[:2]
+    x_min = max(0, min(x1, x2))
+    x_max = min(width - 1, max(x1, x2))
+    y_min = max(0, min(y1, y2))
+    y_max = min(height - 1, max(y1, y2))
+
+    if x_max <= x_min or y_max <= y_min:
+        raise gr.Error("BBox has zero area. Click two different corners.")
+
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rectangle([x_min, y_min, x_max, y_max], fill=255)
+    return mask, (x_min, y_min, x_max, y_max)
+
+
+def draw_bbox_preview(image: Image.Image, points: list[tuple[int, int]]) -> Image.Image:
+    """Draw clicked points and the current bbox preview on an image."""
+    preview = image.convert("RGB").copy()
+    draw = ImageDraw.Draw(preview)
+
+    for x, y in points[:2]:
+        radius = max(3, min(preview.size) // 150)
+        draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=(255, 0, 0), outline=(255, 255, 255))
+
+    if len(points) >= 2:
+        _, bbox = make_bbox_mask(preview.size, points)
+        draw.rectangle(bbox, outline=(255, 0, 0), width=max(2, min(preview.size) // 250))
+
+    return preview
+
+
+def add_bbox_point(
+    image_path: str,
+    points: list[tuple[int, int]],
+    evt: gr.SelectData,
+) -> tuple[Image.Image, list[tuple[int, int]], Optional[Image.Image], str]:
+    """Add one clicked bbox point and preview the resulting rectangular mask."""
     path = Path(image_path).expanduser()
     if not path.is_file():
         raise gr.Error(f"Image path does not exist: {path}")
-    return Image.open(path).convert("RGB"), None, "Cleared mask"
+
+    image = Image.open(path).convert("RGB")
+    x, y = parse_select_index(evt.index)
+    width, height = image.size
+    x = int(np.clip(x, 0, width - 1))
+    y = int(np.clip(y, 0, height - 1))
+
+    points = list(points or [])
+    if len(points) >= 2:
+        points = []
+    points.append((x, y))
+
+    preview = draw_bbox_preview(image, points)
+    mask_preview = None
+    if len(points) == 2:
+        mask_preview, bbox = make_bbox_mask(image.size, points)
+        message = f"BBox ready: x1={bbox[0]}, y1={bbox[1]}, x2={bbox[2]}, y2={bbox[3]}"
+    else:
+        message = f"First corner selected: x={x}, y={y}. Click the second corner."
+
+    return preview, points, mask_preview, message
+
+
+def save_bbox_mask(
+    image_path: str,
+    output_path: str,
+    points: list[tuple[int, int]],
+) -> tuple[str, Image.Image]:
+    """Save a binary rectangular mask from selected bbox points."""
+    if not output_path:
+        raise gr.Error("Output mask path is required.")
+
+    path = Path(image_path).expanduser()
+    if not path.is_file():
+        raise gr.Error(f"Image path does not exist: {path}")
+
+    image = Image.open(path).convert("RGB")
+    mask, bbox = make_bbox_mask(image.size, list(points or []))
+    output = Path(output_path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    mask.save(output)
+    return f"Saved bbox mask to {output} with bbox={bbox}", mask
+
+
+def clear_mask(
+    image_path: str,
+) -> tuple[Optional[Image.Image], Optional[Image.Image], Optional[Image.Image], list[tuple[int, int]], str]:
+    """Reload the current image and clear the mask preview."""
+    if not image_path:
+        return None, None, None, [], ""
+    path = Path(image_path).expanduser()
+    if not path.is_file():
+        raise gr.Error(f"Image path does not exist: {path}")
+    image = Image.open(path).convert("RGB")
+    return image, image, None, [], "Cleared mask"
 
 
 def build_app() -> gr.Blocks:
@@ -134,24 +245,43 @@ def build_app() -> gr.Blocks:
             clear_button = gr.Button("Clear")
 
         threshold = gr.Slider(0, 255, value=10, step=1, label="Mask extraction threshold")
-        editor = gr.ImageEditor(label="Draw mask", type="pil", image_mode="RGBA")
+        bbox_points = gr.State([])
+
+        with gr.Tab("Brush mask"):
+            editor = gr.ImageEditor(label="Draw mask", type="pil", image_mode="RGBA")
+
+        with gr.Tab("BBox mask"):
+            gr.Markdown("Click two corners on the image below. The second click creates a rectangular binary mask.")
+            bbox_image = gr.Image(label="Click two bbox corners", type="pil", interactive=True)
+            save_bbox_button = gr.Button("Save BBox Mask", variant="primary")
+
         status = gr.Textbox(label="Status", interactive=False)
         mask_preview = gr.Image(label="Saved binary mask preview", type="pil", image_mode="L")
 
         load_button.click(
             load_image,
             inputs=[image_path, output_path],
-            outputs=[editor, output_path, mask_preview],
+            outputs=[editor, bbox_image, output_path, mask_preview, bbox_points, status],
         )
         save_button.click(
             save_mask,
             inputs=[editor, output_path, threshold],
             outputs=[status, mask_preview],
         )
+        bbox_image.select(
+            add_bbox_point,
+            inputs=[image_path, bbox_points],
+            outputs=[bbox_image, bbox_points, mask_preview, status],
+        )
+        save_bbox_button.click(
+            save_bbox_mask,
+            inputs=[image_path, output_path, bbox_points],
+            outputs=[status, mask_preview],
+        )
         clear_button.click(
             clear_mask,
             inputs=[image_path],
-            outputs=[editor, mask_preview, status],
+            outputs=[editor, bbox_image, mask_preview, bbox_points, status],
         )
 
     return app
