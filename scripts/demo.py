@@ -256,6 +256,20 @@ class FeatureExtractor:
             features[key] = value.squeeze(0)
         
         return features
+
+    @staticmethod
+    def _is_feature_input_image(path: Path, root: Path) -> bool:
+        """Return whether an image path should be treated as RGB input."""
+        relative_parts = path.relative_to(root).parts
+        parent_parts = {part.lower() for part in relative_parts[:-1]}
+        if parent_parts & {"mask", "masks"}:
+            return False
+
+        stem = path.stem.lower()
+        if stem == "mask" or stem.endswith("_mask") or "mask_" in stem or "_mask_" in stem:
+            return False
+
+        return True
     
     def process_directory(self, input_dir: Union[str, Path]) -> dict:
         """Process all images in a directory"""
@@ -263,7 +277,10 @@ class FeatureExtractor:
         
         # Find all image files
         image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
-        image_paths = [p for p in input_path.rglob('*') if p.suffix.lower() in image_extensions]
+        image_paths = [
+            p for p in input_path.rglob('*')
+            if p.suffix.lower() in image_extensions and self._is_feature_input_image(p, input_path)
+        ]
         
         if not image_paths:
             raise ValueError(f"No images found in {input_dir}")
