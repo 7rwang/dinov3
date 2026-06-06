@@ -19,11 +19,25 @@ def load_feature(path: str, feature_key: str, image_name: Optional[str] = None) 
     """Load a [num_patches, dim] feature from a feature dir, .npy, or .npz."""
     path_obj = Path(path)
     if path_obj.is_dir():
-        path_obj = path_obj / f"{feature_key}.npy"
-        if not path_obj.exists():
-            npz_path = path_obj.with_suffix(".npz")
-            if npz_path.exists():
-                path_obj = npz_path
+        feature_dir = path_obj
+        direct_npy = feature_dir / f"{feature_key}.npy"
+        direct_npz = feature_dir / f"{feature_key}.npz"
+        if direct_npy.exists():
+            path_obj = direct_npy
+        elif direct_npz.exists():
+            path_obj = direct_npz
+        else:
+            candidates = [
+                child / "features"
+                for child in feature_dir.iterdir()
+                if child.is_dir() and (child / "features").is_dir()
+            ]
+            if not candidates:
+                raise FileNotFoundError(f"Cannot find {feature_key}.npy/.npz or timestamp/features in {feature_dir}")
+            latest_feature_dir = sorted(candidates)[-1]
+            path_obj = latest_feature_dir / f"{feature_key}.npy"
+            if not path_obj.exists():
+                path_obj = latest_feature_dir / f"{feature_key}.npz"
 
     if path_obj.suffix == ".npy":
         feature = np.load(path_obj)

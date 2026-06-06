@@ -1,0 +1,54 @@
+samples:
+  - name: handle_421065
+    label: handle
+    scene_id: "421065"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/421065
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/421065/mask/mask2.png
+
+  - name: handle_422006
+    label: handle
+    scene_id: "422006"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/422006
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/422006/mask/mask2.png
+
+  - name: handle_422377
+    label: handle
+    scene_id: "422377"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/422377
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/422377/mask/mask2.png
+
+  - name: handle_422838
+    label: handle
+    scene_id: "422838"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/422838
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/422838/mask/mask2.png
+
+  - name: handle_426143
+    label: handle
+    scene_id: "426143"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/426143
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/426143/mask/mask2.png
+
+  - name: handle_466899
+    label: handle
+    scene_id: "466899"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/466899
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/466899/mask/mask2.png
+
+  - name: handle_467109
+    label: handle
+    scene_id: "467109"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/467109
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/467109/mask/mask2.png
+
+  - name: handle_468074
+    label: handle
+    scene_id: "468074"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/468074
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/468074/mask/mask2.png
+
+  - name: handle_468275
+    label: handle
+    scene_id: "468275"
+    feature_path: /nas/qirui/dinov3/outputs/demo/differenthandle_canonical_representation/468275
+    mask_path: /nas/qirui/dinov3/src/DifferentTypeHandle/468275/mask/mask2.png
