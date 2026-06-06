@@ -49,4 +49,4 @@ hydra:
   job:
     chdir: false
   run:
-    dir: outputs/demo/${scene.id}/${exp.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/demo/${exp.name}/${scene.id}/${now:%Y-%m-%d_%H-%M-%S}
