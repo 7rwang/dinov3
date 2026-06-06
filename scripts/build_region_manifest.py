@@ -13,36 +13,60 @@ import yaml
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 
 
-def find_scene_image(scene_dir: Path) -> Path:
-    images = [
+def find_scene_images(scene_dir: Path) -> list[Path]:
+    images = sorted([
         path for path in scene_dir.iterdir()
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    ]
+    ])
     if not images:
         raise FileNotFoundError(f"No image found in {scene_dir}")
-    if len(images) > 1:
-        print(f"Warning: multiple images in {scene_dir}; using {images[0].name}")
-    return sorted(images)[0]
+    return images
 
 
-def find_mask(scene_dir: Path, mask_name: str) -> Path:
-    mask_path = scene_dir / "mask" / mask_name
-    if mask_path.exists():
-        return mask_path
-
+def find_scene_masks(scene_dir: Path) -> list[Path]:
     mask_dir = scene_dir / "mask"
     if not mask_dir.is_dir():
         raise FileNotFoundError(f"No mask directory found in {scene_dir}")
 
-    masks = [
+    masks = sorted([
         path for path in mask_dir.iterdir()
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
-    ]
+    ])
     if not masks:
         raise FileNotFoundError(f"No mask image found in {mask_dir}")
-    if len(masks) > 1:
-        print(f"Warning: {mask_name} not found in {mask_dir}; using {masks[0].name}")
-    return sorted(masks)[0]
+    return masks
+
+
+def normalize_stem(stem: str) -> str:
+    normalized = stem.lower()
+    for token in ["_mask", "mask_", "mask", "_handle", "handle_"]:
+        normalized = normalized.replace(token, "")
+    return normalized.strip("_-.")
+
+
+def match_mask_for_image(image_path: Path, masks: list[Path], preferred_mask_name: str | None) -> Path:
+    if preferred_mask_name and len(masks) == 1 and masks[0].name == preferred_mask_name:
+        return masks[0]
+
+    image_stem = normalize_stem(image_path.stem)
+
+    exact_matches = [mask for mask in masks if normalize_stem(mask.stem) == image_stem]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+
+    contains_matches = [
+        mask for mask in masks
+        if image_stem and (image_stem in normalize_stem(mask.stem) or normalize_stem(mask.stem) in image_stem)
+    ]
+    if len(contains_matches) == 1:
+        return contains_matches[0]
+
+    if len(masks) == 1:
+        return masks[0]
+
+    raise ValueError(
+        f"Cannot match mask for image {image_path.name}. Available masks: {[mask.name for mask in masks]}"
+    )
 
 
 def find_feature_dir(feature_root: Path, scene_id: str) -> Path:
@@ -79,22 +103,25 @@ def build_manifest(
             print(f"Skipping missing scene directory: {scene_dir}")
             continue
 
-        image_path = find_scene_image(scene_dir)
-        mask_path = find_mask(scene_dir, mask_name)
+        image_paths = find_scene_images(scene_dir)
+        mask_paths = find_scene_masks(scene_dir)
         feature_dir = find_feature_dir(feature_root, scene_id)
 
-        samples.append(
-            {
-                "name": f"{label}_{scene_id}",
-                "label": label,
-                "scene_id": scene_id,
-                "image_name": image_path.stem,
-                "image_path": str(image_path),
-                "feature_path": str(feature_dir),
-                "mask_path": str(mask_path),
-            }
-        )
-        print(f"Added {scene_id}: image={image_path.name}, mask={mask_path.name}, features={feature_dir}")
+        for image_path in image_paths:
+            mask_path = match_mask_for_image(image_path, mask_paths, mask_name)
+            sample_name = f"{label}_{scene_id}_{image_path.stem}"
+            samples.append(
+                {
+                    "name": sample_name,
+                    "label": label,
+                    "scene_id": scene_id,
+                    "image_name": image_path.stem,
+                    "image_path": str(image_path),
+                    "feature_path": str(feature_dir),
+                    "mask_path": str(mask_path),
+                }
+            )
+            print(f"Added {sample_name}: image={image_path.name}, mask={mask_path.name}, features={feature_dir}")
 
     if not samples:
         raise ValueError("No samples were added to the manifest")
