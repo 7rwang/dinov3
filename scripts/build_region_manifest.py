@@ -63,15 +63,13 @@ def match_masks_for_image(
     image_stem = normalize_stem(image_path.stem)
 
     exact_matches = [mask for mask in masks if normalize_stem(mask.stem) == image_stem]
-    if exact_matches:
-        return exact_matches
-
     contains_matches = [
         mask for mask in masks
         if image_stem and (image_stem in normalize_stem(mask.stem) or normalize_stem(mask.stem) in image_stem)
     ]
-    if contains_matches:
-        return contains_matches
+    matched = sorted(set(exact_matches + contains_matches))
+    if matched:
+        return matched
 
     if len(masks) == 1:
         return masks
