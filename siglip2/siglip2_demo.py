@@ -343,6 +343,8 @@ def demo_from_local(
     heatmap_text=None,
     occlusion_grid=16,
     occlusion_batch_size=4,
+    output_dir=None,
+    save_name=None,
 ):
     """从本地文件加载图像并进行匹配"""
     print(f"Loading local image: {image_path}")
@@ -382,7 +384,9 @@ def demo_from_local(
             # 生成保存路径
             image_name = os.path.splitext(os.path.basename(image_path))[0]
             safe_text = target_text.replace(" ", "_").replace("/", "_")
-            save_path = f"heatmap_{heatmap_method}_{image_name}_{safe_text}.png"
+            filename = save_name or f"heatmap_{heatmap_method}_{image_name}_{safe_text}.png"
+            save_path = Path(output_dir) / filename if output_dir else Path(filename)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
             
             heatmap, overlay = generate_heatmap(
                 image,
@@ -509,6 +513,10 @@ def main():
                        help="occlusion heatmap网格大小，默认16x16")
     parser.add_argument("--occlusion_batch_size", type=int, default=4,
                        help="occlusion前向传播batch size，显存不够时调小")
+    parser.add_argument("--output_dir", type=str,
+                       help="热力图保存目录；默认保存到当前运行目录")
+    parser.add_argument("--save_name", type=str,
+                       help="热力图文件名；默认自动生成")
     
     args = parser.parse_args()
     
@@ -530,6 +538,8 @@ def main():
             heatmap_text=args.heatmap_text,
             occlusion_grid=args.occlusion_grid,
             occlusion_batch_size=args.occlusion_batch_size,
+            output_dir=args.output_dir,
+            save_name=args.save_name,
         )
     else:
         # 默认演示
