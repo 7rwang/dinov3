@@ -118,12 +118,26 @@ def process_image_text(model, processor, device, image, texts):
     similarities = torch.cosine_similarity(text_embeds, image_embeds.unsqueeze(0), dim=-1)
     return similarities.cpu().numpy()
 
+def score_image_text_logits(model, processor, device, images, text):
+    """Return SigLIP logits for one text against one or more images."""
+    single_image = not isinstance(images, (list, tuple))
+    image_batch = [images] if single_image else list(images)
+    inputs = processor(text=[text], images=image_batch, return_tensors="pt", padding=True)
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+        scores = outputs.logits_per_image[:, 0]
+
+    scores = scores.detach().cpu().numpy()
+    return scores[0] if single_image else scores
+
 def process_image_text_with_heatmap(model, processor, device, image, text):
     """
-    正确的流程：
-    image -> SigLIP2 vision encoder -> patch features: [num_patches, dim]
-    text  -> SigLIP2 text encoder   -> text feature:   [dim]
-    similarity = cosine(patch_features, text_feature)
+    Fast but approximate patch-token heatmap.
+
+    SigLIP2 is trained with an image-level head, so patch-token cosine is only a
+    rough diagnostic. Use occlusion_heatmap for a more faithful localization.
     """
     inputs = processor(text=[text], images=image, return_tensors="pt", padding=True)
     inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -153,6 +167,54 @@ def process_image_text_with_heatmap(model, processor, device, image, text):
         grid_shape = _infer_patch_grid(model, inputs["pixel_values"], patch_features.shape[0])
         input_size = tuple(inputs["pixel_values"].shape[-2:])
         return similarities.cpu().numpy(), grid_shape, input_size
+
+def process_image_text_with_occlusion_heatmap(
+    model,
+    processor,
+    device,
+    image,
+    text,
+    grid_size=16,
+    batch_size=4,
+):
+    """Generate a heatmap by measuring how much each occlusion lowers the text logit."""
+    inputs = processor(text=[text], images=image, return_tensors="pt", padding=True)
+    input_h, input_w = tuple(inputs["pixel_values"].shape[-2:])
+    resized_image = image.convert("RGB").resize((input_w, input_h), Image.BICUBIC)
+
+    baseline_score = score_image_text_logits(model, processor, device, resized_image, text)
+    print(f"Baseline logit for '{text}': {baseline_score:.4f}")
+
+    image_np = np.array(resized_image)
+    fill_color = np.mean(image_np.reshape(-1, 3), axis=0).astype(np.uint8)
+    row_edges = np.linspace(0, input_h, grid_size + 1, dtype=int)
+    col_edges = np.linspace(0, input_w, grid_size + 1, dtype=int)
+
+    occluded_images = []
+    locations = []
+    for row in range(grid_size):
+        for col in range(grid_size):
+            occluded = image_np.copy()
+            y0, y1 = row_edges[row], row_edges[row + 1]
+            x0, x1 = col_edges[col], col_edges[col + 1]
+            occluded[y0:y1, x0:x1] = fill_color
+            occluded_images.append(Image.fromarray(occluded))
+            locations.append((row, col))
+
+    heatmap_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
+    for start in range(0, len(occluded_images), batch_size):
+        end = min(start + batch_size, len(occluded_images))
+        batch_scores = score_image_text_logits(
+            model,
+            processor,
+            device,
+            occluded_images[start:end],
+            text,
+        )
+        for score, (row, col) in zip(batch_scores, locations[start:end]):
+            heatmap_grid[row, col] = max(0.0, baseline_score - score)
+
+    return heatmap_grid.reshape(-1), (grid_size, grid_size), (input_h, input_w)
 
 def generate_heatmap(image, similarities, grid_shape=None, input_size=None, save_path=None):
     """
@@ -270,7 +332,18 @@ def demo_from_url(model, processor, device, image_url, texts):
     
     return similarities
 
-def demo_from_local(model, processor, device, image_path, texts, generate_heatmap_flag=False):
+def demo_from_local(
+    model,
+    processor,
+    device,
+    image_path,
+    texts,
+    generate_heatmap_flag=False,
+    heatmap_method="occlusion",
+    heatmap_text=None,
+    occlusion_grid=16,
+    occlusion_batch_size=4,
+):
     """从本地文件加载图像并进行匹配"""
     print(f"Loading local image: {image_path}")
     image = Image.open(image_path)
@@ -288,15 +361,28 @@ def demo_from_local(model, processor, device, image_path, texts, generate_heatma
     
     # 生成热力图
     if generate_heatmap_flag:
-        print(f"\n正在生成'{best_text}'的热力图...")
+        target_text = heatmap_text or best_text
+        print(f"\n正在用 {heatmap_method} 方法生成'{target_text}'的热力图...")
         try:
-            patch_similarities, grid_shape, input_size = process_image_text_with_heatmap(
-                model, processor, device, image, best_text
-            )
+            if heatmap_method == "occlusion":
+                patch_similarities, grid_shape, input_size = process_image_text_with_occlusion_heatmap(
+                    model,
+                    processor,
+                    device,
+                    image,
+                    target_text,
+                    grid_size=occlusion_grid,
+                    batch_size=occlusion_batch_size,
+                )
+            else:
+                patch_similarities, grid_shape, input_size = process_image_text_with_heatmap(
+                    model, processor, device, image, target_text
+                )
             
             # 生成保存路径
             image_name = os.path.splitext(os.path.basename(image_path))[0]
-            save_path = f"heatmap_{image_name}_{best_text.replace(' ', '_')}.png"
+            safe_text = target_text.replace(" ", "_").replace("/", "_")
+            save_path = f"heatmap_{heatmap_method}_{image_name}_{safe_text}.png"
             
             heatmap, overlay = generate_heatmap(
                 image,
@@ -308,12 +394,6 @@ def demo_from_local(model, processor, device, image_path, texts, generate_heatma
             
         except Exception as e:
             print(f"生成热力图时出错: {e}")
-            print("尝试使用简化方法...")
-            # 如果上面的方法失败，使用attention weights的简化方法
-            try:
-                simplified_heatmap(model, processor, device, image, best_text, image_path)
-            except Exception as e2:
-                print(f"简化方法也失败了: {e2}")
     
     return similarities
 
@@ -420,6 +500,15 @@ def main():
                        help="Transformers模型名或本地Transformers模型目录")
     parser.add_argument("--heatmap", action="store_true", 
                        help="生成热力图显示图像中与文本最相关的区域")
+    parser.add_argument("--heatmap_method", choices=["occlusion", "patch_similarity"],
+                       default="occlusion",
+                       help="热力图方法：occlusion更慢但更可信；patch_similarity更快但只是粗略诊断")
+    parser.add_argument("--heatmap_text", type=str,
+                       help="指定生成热力图的文本；默认使用匹配分数最高的文本")
+    parser.add_argument("--occlusion_grid", type=int, default=16,
+                       help="occlusion heatmap网格大小，默认16x16")
+    parser.add_argument("--occlusion_batch_size", type=int, default=4,
+                       help="occlusion前向传播batch size，显存不够时调小")
     
     args = parser.parse_args()
     
@@ -430,7 +519,18 @@ def main():
     if args.image_url:
         demo_from_url(model, processor, device, args.image_url, args.texts)
     elif args.image_path:
-        demo_from_local(model, processor, device, args.image_path, args.texts, args.heatmap)
+        demo_from_local(
+            model,
+            processor,
+            device,
+            args.image_path,
+            args.texts,
+            args.heatmap,
+            heatmap_method=args.heatmap_method,
+            heatmap_text=args.heatmap_text,
+            occlusion_grid=args.occlusion_grid,
+            occlusion_batch_size=args.occlusion_batch_size,
+        )
     else:
         # 默认演示
         print("运行默认演示...")
