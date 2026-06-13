@@ -106,20 +106,16 @@ def _infer_patch_grid(model, pixel_values, num_patches):
     )
 
 def process_image_text(model, processor, device, image, texts):
-    """处理图像和文本，返回相似度分数"""
+    """处理图像和文本，返回每个文本的整图匹配logit"""
     # 处理输入
     inputs = processor(text=texts, images=image, return_tensors="pt", padding=True)
     inputs = {k: v.to(device) for k, v in inputs.items()}
     
-    # 获取嵌入
     with torch.no_grad():
         outputs = model(**inputs)
-        image_embeds = outputs.image_embeds
-        text_embeds = outputs.text_embeds
-    
-    # 计算相似度
-    similarities = torch.cosine_similarity(text_embeds, image_embeds.unsqueeze(0), dim=-1)
-    return similarities.cpu().numpy()
+        scores = outputs.logits_per_image[0]
+
+    return scores.detach().cpu().numpy()
 
 def score_image_text_logits(model, processor, device, images, text):
     """Return SigLIP logits for one text against one or more images."""
