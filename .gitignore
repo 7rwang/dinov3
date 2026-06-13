@@ -16,3 +16,15 @@ dist/
 
 # Ignore vscode directory
 .vscode/
+
+# generated outputs
+outputs/
+*.npy
+*.npz
+*.png
+*.jpg
+*.jpeg
+
+# hydra logs
+.hydra/
+*.log
