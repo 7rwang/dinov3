@@ -233,6 +233,7 @@ def convert_siglip2_gopt_384(checkpoint_path, output_dir, tokenizer_name=DEFAULT
     image_processor = SiglipImageProcessor(size={"height": 384, "width": 384}, resample=2)
     processor = SiglipProcessor(image_processor=image_processor, tokenizer=tokenizer)
     processor.save_pretrained(output_dir)
+    image_processor.save_pretrained(output_dir)
 
     missing = [name for name in PROCESSOR_FILES if not (output_dir / name).exists()]
     if missing:

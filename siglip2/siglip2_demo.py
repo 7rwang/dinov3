@@ -39,7 +39,7 @@ def convert_npz_to_transformers_dir(model_path, output_dir=None):
     converter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(converter)
 
-    print(f"Converting {checkpoint_path} to Transformers format at {output_dir}")
+    print(f"Preparing Transformers model directory at {output_dir} from {checkpoint_path}")
     return converter.convert_siglip2_gopt_384(str(checkpoint_path), str(output_dir))
 
 def load_model(model_path=None, hf_model_name=DEFAULT_HF_MODEL):
