@@ -24,6 +24,8 @@ outputs/
 *.png
 *.jpg
 *.jpeg
+*.safetensors
+siglip2/*_hf/
 
 # hydra logs
 .hydra/

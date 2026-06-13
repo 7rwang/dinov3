@@ -10,12 +10,33 @@ from PIL import Image
 import requests
 from transformers import AutoModel, AutoProcessor
 import argparse
+import importlib.util
 import os
+from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import torch.nn.functional as F
 
-DEFAULT_HF_MODEL = "google/siglip2-giant-opt-patch16-384"
+DEFAULT_HF_MODEL = "google/siglip2-so400m-patch14-384"
+DEFAULT_NPZ_MODEL = "/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384.npz"
+
+def convert_npz_to_transformers_dir(model_path, output_dir=None):
+    checkpoint_path = Path(model_path)
+    if output_dir is None:
+        output_dir = checkpoint_path.with_name(f"{checkpoint_path.stem}_hf")
+    output_dir = Path(output_dir)
+
+    if (output_dir / "config.json").exists():
+        print(f"Using converted Transformers model: {output_dir}")
+        return str(output_dir)
+
+    converter_path = Path(__file__).with_name("convert_siglip2_npz_to_hf.py")
+    spec = importlib.util.spec_from_file_location("convert_siglip2_npz_to_hf", converter_path)
+    converter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(converter)
+
+    print(f"Converting {checkpoint_path} to Transformers format at {output_dir}")
+    return converter.convert_siglip2_gopt_384(str(checkpoint_path), str(output_dir))
 
 def load_model(model_path=None, hf_model_name=DEFAULT_HF_MODEL):
     """加载SigLIP2模型和processor"""
@@ -23,12 +44,7 @@ def load_model(model_path=None, hf_model_name=DEFAULT_HF_MODEL):
         if os.path.isdir(model_path):
             model_name = model_path
         elif model_path.endswith(".npz") and os.path.exists(model_path):
-            raise ValueError(
-                f"{model_path} is a big_vision/JAX .npz checkpoint, but this script uses "
-                "the PyTorch Transformers model API. Convert the checkpoint to a "
-                "Transformers directory first, or run with --model_path unset and "
-                f"--hf_model_name {hf_model_name}."
-            )
+            model_name = convert_npz_to_transformers_dir(model_path)
         elif os.path.exists(model_path):
             raise ValueError(f"Unsupported model_path format: {model_path}")
         else:
@@ -396,7 +412,7 @@ def main():
                        default=["a cat", "a dog", "a bird", "a car", "a person"],
                        help="文本描述列表")
     parser.add_argument("--model_path", type=str, 
-                       default="/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384.npz",
+                       default=DEFAULT_NPZ_MODEL,
                        help="本地模型权重路径")
     parser.add_argument("--hf_model_name", type=str,
                        default=DEFAULT_HF_MODEL,
