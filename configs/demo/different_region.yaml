@@ -1,0 +1,44 @@
+handle1:
+  image_name: "42444499_2462.329.jpg"
+  mask_path: "src/DifferentTypeHandle/421065/mask/mask2.png"
+  feature_path: ""
+
+handle2:
+  image_name: "42446031_135389.674.jpg"
+  mask_path: "src/DifferentTypeHandle/422006/mask/mask2.png"
+  feature_path: ""
+
+handle3:
+  image_name: "42447320_410354.820.jpg"
+  mask_path: "src/DifferentTypeHandle/422377/mask/mask.png"
+  feature_path: ""
+
+handle4:
+  image_name: "42897675_148531.119.jpg"
+  mask_path: "src/DifferentTypeHandle/422838/mask/mask2.png"
+  feature_path: ""
+
+handle5:
+  image_name: "42898762_65112.016.jpg"
+  mask_path: "src/DifferentTypeHandle/426143/mask/mask2.png"
+  feature_path: ""
+
+handle6:
+  image_name: "47331625_20162.561.jpg"
+  mask_path: "src/DifferentTypeHandle/466899/mask/mask2.png"
+  feature_path: ""
+
+handle7:
+  image_name: "47333323_29406.941.jpg"
+  mask_path: "src/DifferentTypeHandle/467109/mask/mask2.png"
+  feature_path: ""
+
+handle8:
+  image_name: "47333826_53451.771.jpg"
+  mask_path: "src/DifferentTypeHandle/468074/mask/mask2.png"
+  feature_path: ""
+
+handle9:
+  image_name: "47331294_14792.970.jpg"
+  mask_path: "src/DifferentTypeHandle/468275/mask/mask.png"
+  feature_path: ""
