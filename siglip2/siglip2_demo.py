@@ -19,6 +19,7 @@ import torch.nn.functional as F
 
 DEFAULT_HF_MODEL = "google/siglip2-so400m-patch14-384"
 DEFAULT_NPZ_MODEL = "/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384.npz"
+DEFAULT_HEATMAP_OUTPUT_DIR = "/nas/qirui/dinov3/outputs/siglip2_heatmaps"
 
 def convert_npz_to_transformers_dir(model_path, output_dir=None):
     checkpoint_path = Path(model_path)
@@ -512,8 +513,8 @@ def main():
                        help="occlusion heatmap网格大小，默认16x16")
     parser.add_argument("--occlusion_batch_size", type=int, default=4,
                        help="occlusion前向传播batch size，显存不够时调小")
-    parser.add_argument("--output_dir", type=str,
-                       help="热力图保存目录；默认保存到当前运行目录")
+    parser.add_argument("--output_dir", type=str, default=DEFAULT_HEATMAP_OUTPUT_DIR,
+                       help=f"热力图保存目录；默认 {DEFAULT_HEATMAP_OUTPUT_DIR}")
     parser.add_argument("--save_name", type=str,
                        help="热力图文件名；默认自动生成")
     
