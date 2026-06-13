@@ -26,7 +26,8 @@ def convert_npz_to_transformers_dir(model_path, output_dir=None):
         output_dir = checkpoint_path.with_name(f"{checkpoint_path.stem}_hf")
     output_dir = Path(output_dir)
 
-    if (output_dir / "config.json").exists():
+    required_files = ("config.json", "preprocessor_config.json", "tokenizer_config.json")
+    if all((output_dir / filename).exists() for filename in required_files):
         print(f"Using converted Transformers model: {output_dir}")
         return str(output_dir)
 

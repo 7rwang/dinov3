@@ -12,12 +12,13 @@ from pathlib import Path
 import numpy as np
 import torch
 from numpy import load
-from transformers import GemmaTokenizerFast, SiglipConfig, SiglipImageProcessor, SiglipModel, SiglipProcessor
+from transformers import AutoTokenizer, SiglipConfig, SiglipImageProcessor, SiglipModel, SiglipProcessor
 
 
 MODEL_NAME = "siglip2-giant-opt-patch16-384"
 DEFAULT_CHECKPOINT = "/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384.npz"
 DEFAULT_OUTPUT_DIR = "/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384_hf"
+DEFAULT_TOKENIZER = "google/siglip2-so400m-patch14-384"
 
 
 def get_siglip2_gopt_384_config():
@@ -190,7 +191,7 @@ def read_in_q_k_v_head(state_dict, config):
 
 
 @torch.no_grad()
-def convert_siglip2_gopt_384(checkpoint_path, output_dir, tokenizer_name="google/gemma-2-9b-it"):
+def convert_siglip2_gopt_384(checkpoint_path, output_dir, tokenizer_name=DEFAULT_TOKENIZER):
     checkpoint_path = Path(checkpoint_path)
     output_dir = Path(output_dir)
     if not checkpoint_path.exists():
@@ -214,7 +215,7 @@ def convert_siglip2_gopt_384(checkpoint_path, output_dir, tokenizer_name="google
     model.save_pretrained(output_dir)
 
     print(f"Loading tokenizer from: {tokenizer_name}")
-    tokenizer = GemmaTokenizerFast.from_pretrained(
+    tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_name,
         add_bos_token=False,
         add_eos_token=True,
@@ -234,7 +235,7 @@ def main():
     parser = argparse.ArgumentParser(description=f"Convert {MODEL_NAME} .npz to Transformers format")
     parser.add_argument("--checkpoint_path", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--output_dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--tokenizer_name", default="google/gemma-2-9b-it")
+    parser.add_argument("--tokenizer_name", default=DEFAULT_TOKENIZER)
     args = parser.parse_args()
     convert_siglip2_gopt_384(args.checkpoint_path, args.output_dir, args.tokenizer_name)
 
