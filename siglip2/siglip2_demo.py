@@ -13,19 +13,30 @@ import argparse
 import os
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from scipy import ndimage
+import torch.nn.functional as F
 
-def load_model(model_path=None):
+DEFAULT_HF_MODEL = "google/siglip2-giant-opt-patch16-384"
+
+def load_model(model_path=None, hf_model_name=DEFAULT_HF_MODEL):
     """加载SigLIP2模型和processor"""
-    if model_path and os.path.exists(model_path):
-        # 加载本地权重文件
-        print(f"Loading local weights from {model_path}")
-        # 这里需要根据实际的权重格式进行调整
-        # 暂时使用Hugging Face的预训练模型
-        model_name = "google/siglip-base-patch16-224"
+    if model_path:
+        if os.path.isdir(model_path):
+            model_name = model_path
+        elif model_path.endswith(".npz") and os.path.exists(model_path):
+            raise ValueError(
+                f"{model_path} is a big_vision/JAX .npz checkpoint, but this script uses "
+                "the PyTorch Transformers model API. Convert the checkpoint to a "
+                "Transformers directory first, or run with --model_path unset and "
+                f"--hf_model_name {hf_model_name}."
+            )
+        elif os.path.exists(model_path):
+            raise ValueError(f"Unsupported model_path format: {model_path}")
+        else:
+            print(f"Model path does not exist: {model_path}")
+            print(f"Falling back to Hugging Face model: {hf_model_name}")
+            model_name = hf_model_name
     else:
-        # 使用Hugging Face预训练模型
-        model_name = "google/siglip-base-patch16-224"
+        model_name = hf_model_name
     
     print(f"Loading model: {model_name}")
     model = AutoModel.from_pretrained(model_name)
@@ -33,10 +44,46 @@ def load_model(model_path=None):
     
     # 如果有GPU可用，移到GPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
+    model = model.to(device).eval()
     print(f"Model loaded on {device}")
     
     return model, processor, device
+
+def _get_vision_image_size(model, pixel_values):
+    vision_config = getattr(getattr(model, "config", None), "vision_config", None)
+    if vision_config is not None and hasattr(vision_config, "image_size"):
+        image_size = vision_config.image_size
+        if isinstance(image_size, (tuple, list)):
+            return int(image_size[0]), int(image_size[1])
+        return int(image_size), int(image_size)
+    return int(pixel_values.shape[-2]), int(pixel_values.shape[-1])
+
+def _get_patch_size(model):
+    vision_config = getattr(getattr(model, "config", None), "vision_config", None)
+    if vision_config is not None and hasattr(vision_config, "patch_size"):
+        patch_size = vision_config.patch_size
+        if isinstance(patch_size, (tuple, list)):
+            return int(patch_size[0]), int(patch_size[1])
+        return int(patch_size), int(patch_size)
+    return None
+
+def _infer_patch_grid(model, pixel_values, num_patches):
+    image_h, image_w = _get_vision_image_size(model, pixel_values)
+    patch_size = _get_patch_size(model)
+    if patch_size is not None:
+        patch_h, patch_w = patch_size
+        grid_h, grid_w = image_h // patch_h, image_w // patch_w
+        if grid_h * grid_w == num_patches:
+            return grid_h, grid_w
+
+    grid_size = int(np.sqrt(num_patches))
+    if grid_size * grid_size == num_patches:
+        return grid_size, grid_size
+
+    raise ValueError(
+        f"Cannot infer patch grid for {num_patches} patches. "
+        "Check whether the model output contains extra tokens."
+    )
 
 def process_image_text(model, processor, device, image, texts):
     """处理图像和文本，返回相似度分数"""
@@ -68,7 +115,7 @@ def process_image_text_with_heatmap(model, processor, device, image, text):
         # 1. 获取vision patch features
         vision_inputs = {k: v for k, v in inputs.items() if 'pixel_values' in k}
         vision_outputs = model.vision_model(**vision_inputs)
-        patch_features = vision_outputs.last_hidden_state[0, 1:]  # [num_patches, dim] 排除CLS token
+        patch_features = vision_outputs.last_hidden_state[0]
         
         # 2. 获取text feature
         text_inputs = {k: v for k, v in inputs.items() if 'input_ids' in k or 'attention_mask' in k}
@@ -82,20 +129,26 @@ def process_image_text_with_heatmap(model, processor, device, image, text):
             text_feature = model.text_projection(text_feature)  # [proj_dim]
         
         # 4. 计算cosine similarity
-        similarities = torch.cosine_similarity(
-            patch_features, 
-            text_feature.unsqueeze(0).expand(patch_features.size(0), -1), 
-            dim=-1
-        )  # [num_patches]
+        patch_features = F.normalize(patch_features, dim=-1)
+        text_feature = F.normalize(text_feature, dim=-1)
+        similarities = patch_features @ text_feature
         
-        return similarities.cpu().numpy()
+        grid_shape = _infer_patch_grid(model, inputs["pixel_values"], patch_features.shape[0])
+        input_size = tuple(inputs["pixel_values"].shape[-2:])
+        return similarities.cpu().numpy(), grid_shape, input_size
 
-def generate_heatmap(image, similarities, save_path=None):
+def generate_heatmap(image, similarities, grid_shape=None, input_size=None, save_path=None):
     """
     生成热力图：
     similarities -> reshape 成 H_patch x W_patch -> resize 到原图大小 -> 叠到图片上
     """
     # 转换PIL图像为numpy数组
+    if input_size is not None:
+        input_h, input_w = input_size
+        image = image.convert("RGB").resize((input_w, input_h), Image.BICUBIC)
+    else:
+        image = image.convert("RGB")
+
     image_np = np.array(image)
     h, w = image_np.shape[:2]
     
@@ -104,13 +157,11 @@ def generate_heatmap(image, similarities, save_path=None):
     
     num_patches = len(similarities)
     
-    # 对于标准的ViT，通常input_size=224时是14x14=196 patches
-    # 对于SigLIP base-patch16-224也应该是14x14
-    expected_grid_size = 14  # 224/16 = 14
-    
-    if num_patches == expected_grid_size * expected_grid_size:
-        grid_h = grid_w = expected_grid_size
-        print(f"使用标准14x14 grid")
+    if grid_shape is not None:
+        grid_h, grid_w = grid_shape
+        if grid_h * grid_w != num_patches:
+            raise ValueError(f"grid_shape {grid_shape} does not match {num_patches} patches")
+        print(f"使用模型grid: {grid_h}x{grid_w}")
     else:
         # 尝试找到最接近正方形的因数分解
         grid_size = int(np.sqrt(num_patches))
@@ -136,14 +187,17 @@ def generate_heatmap(image, similarities, save_path=None):
     # 重塑为2D网格
     similarity_grid = similarities.reshape(grid_h, grid_w)
     
-    # 使用scipy进行插值放大到原图大小
-    from scipy.ndimage import zoom
-    zoom_factor_h = h / grid_h
-    zoom_factor_w = w / grid_w
-    heatmap = zoom(similarity_grid, (zoom_factor_h, zoom_factor_w), order=1)
+    heatmap_tensor = torch.from_numpy(similarity_grid).float()[None, None]
+    heatmap = F.interpolate(heatmap_tensor, size=(h, w), mode="bilinear", align_corners=False)
+    heatmap = heatmap[0, 0].numpy()
     
     # 归一化到0-1范围
-    heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min())
+    heatmap_min = heatmap.min()
+    heatmap_max = heatmap.max()
+    if heatmap_max > heatmap_min:
+        heatmap = (heatmap - heatmap_min) / (heatmap_max - heatmap_min)
+    else:
+        heatmap = np.zeros_like(heatmap)
     
     # 创建可视化
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -164,12 +218,7 @@ def generate_heatmap(image, similarities, save_path=None):
     heatmap_colored = cm.jet(heatmap)[:,:,:3]
     
     # 叠加
-    if len(image_np.shape) == 3:
-        overlay = 0.6 * image_np.astype(float) / 255.0 + 0.4 * heatmap_colored
-    else:
-        # 灰度图转RGB
-        image_rgb = np.stack([image_np, image_np, image_np], axis=-1)
-        overlay = 0.6 * image_rgb.astype(float) / 255.0 + 0.4 * heatmap_colored
+    overlay = 0.6 * image_np.astype(float) / 255.0 + 0.4 * heatmap_colored
         
     overlay = np.clip(overlay, 0, 1)
     axes[2].imshow(overlay)
@@ -224,13 +273,21 @@ def demo_from_local(model, processor, device, image_path, texts, generate_heatma
     if generate_heatmap_flag:
         print(f"\n正在生成'{best_text}'的热力图...")
         try:
-            patch_similarities = process_image_text_with_heatmap(model, processor, device, image, best_text)
+            patch_similarities, grid_shape, input_size = process_image_text_with_heatmap(
+                model, processor, device, image, best_text
+            )
             
             # 生成保存路径
             image_name = os.path.splitext(os.path.basename(image_path))[0]
             save_path = f"heatmap_{image_name}_{best_text.replace(' ', '_')}.png"
             
-            heatmap, overlay = generate_heatmap(image, patch_similarities, save_path=save_path)
+            heatmap, overlay = generate_heatmap(
+                image,
+                patch_similarities,
+                grid_shape=grid_shape,
+                input_size=input_size,
+                save_path=save_path,
+            )
             
         except Exception as e:
             print(f"生成热力图时出错: {e}")
@@ -276,7 +333,7 @@ def simplified_heatmap(model, processor, device, image, text, image_path):
             
             # 简化方法：使用图像的patch embeddings
             vision_outputs = vision_model(inputs['pixel_values'], output_hidden_states=True)
-            features = vision_outputs.last_hidden_state[0, 1:]  # 排除CLS token
+            features = vision_outputs.last_hidden_state[0]
             
             # 创建伪梯度权重 (基于特征的方差)
             weights = torch.var(features, dim=-1)
@@ -285,7 +342,15 @@ def simplified_heatmap(model, processor, device, image, text, image_path):
             image_name = os.path.splitext(os.path.basename(image_path))[0]
             save_path = f"simplified_heatmap_{image_name}_{text.replace(' ', '_')}.png"
             
-            generate_heatmap(image, weights.detach().cpu().numpy(), save_path=save_path)
+            grid_shape = _infer_patch_grid(model, inputs["pixel_values"], features.shape[0])
+            input_size = tuple(inputs["pixel_values"].shape[-2:])
+            generate_heatmap(
+                image,
+                weights.detach().cpu().numpy(),
+                grid_shape=grid_shape,
+                input_size=input_size,
+                save_path=save_path,
+            )
         else:
             print("无法访问vision模型特征，使用随机热力图演示...")
             # 生成随机热力图作为演示
@@ -333,13 +398,16 @@ def main():
     parser.add_argument("--model_path", type=str, 
                        default="/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384.npz",
                        help="本地模型权重路径")
+    parser.add_argument("--hf_model_name", type=str,
+                       default=DEFAULT_HF_MODEL,
+                       help="Transformers模型名或本地Transformers模型目录")
     parser.add_argument("--heatmap", action="store_true", 
                        help="生成热力图显示图像中与文本最相关的区域")
     
     args = parser.parse_args()
     
     # 加载模型
-    model, processor, device = load_model(args.model_path)
+    model, processor, device = load_model(args.model_path, args.hf_model_name)
     
     # 运行演示
     if args.image_url:
