@@ -19,6 +19,8 @@ MODEL_NAME = "siglip2-giant-opt-patch16-384"
 DEFAULT_CHECKPOINT = "/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384.npz"
 DEFAULT_OUTPUT_DIR = "/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384_hf"
 DEFAULT_TOKENIZER = "google/siglip2-so400m-patch14-384"
+MODEL_FILES = ("model.safetensors", "pytorch_model.bin")
+PROCESSOR_FILES = ("preprocessor_config.json", "tokenizer_config.json")
 
 
 def get_siglip2_gopt_384_config():
@@ -194,25 +196,30 @@ def read_in_q_k_v_head(state_dict, config):
 def convert_siglip2_gopt_384(checkpoint_path, output_dir, tokenizer_name=DEFAULT_TOKENIZER):
     checkpoint_path = Path(checkpoint_path)
     output_dir = Path(output_dir)
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(checkpoint_path)
-
-    print(f"Loading checkpoint: {checkpoint_path}")
-    config = get_siglip2_gopt_384_config()
-    data = load(checkpoint_path)
-    state_dict = split_encoderblock_layers(flatten_nested_dict(data))
-
-    for src, dest in create_rename_keys(config):
-        rename_key(state_dict, src, dest, config)
-    read_in_q_k_v_head(state_dict, config)
-
-    print("Building Transformers SiglipModel")
-    model = SiglipModel(config).eval()
-    model.load_state_dict(state_dict)
-
-    print(f"Saving model to: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(output_dir)
+    model_exists = (output_dir / "config.json").exists() and any((output_dir / name).exists() for name in MODEL_FILES)
+
+    if model_exists:
+        print(f"Model files already exist in {output_dir}; only ensuring processor/tokenizer files.")
+    else:
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(checkpoint_path)
+
+        print(f"Loading checkpoint: {checkpoint_path}")
+        config = get_siglip2_gopt_384_config()
+        data = load(checkpoint_path)
+        state_dict = split_encoderblock_layers(flatten_nested_dict(data))
+
+        for src, dest in create_rename_keys(config):
+            rename_key(state_dict, src, dest, config)
+        read_in_q_k_v_head(state_dict, config)
+
+        print("Building Transformers SiglipModel")
+        model = SiglipModel(config).eval()
+        model.load_state_dict(state_dict)
+
+        print(f"Saving model to: {output_dir}")
+        model.save_pretrained(output_dir)
 
     print(f"Loading tokenizer from: {tokenizer_name}")
     tokenizer = AutoTokenizer.from_pretrained(
@@ -226,6 +233,10 @@ def convert_siglip2_gopt_384(checkpoint_path, output_dir, tokenizer_name=DEFAULT
     image_processor = SiglipImageProcessor(size={"height": 384, "width": 384}, resample=2)
     processor = SiglipProcessor(image_processor=image_processor, tokenizer=tokenizer)
     processor.save_pretrained(output_dir)
+
+    missing = [name for name in PROCESSOR_FILES if not (output_dir / name).exists()]
+    if missing:
+        raise RuntimeError(f"Processor save did not create required files: {missing}")
 
     print("Conversion complete")
     return str(output_dir)

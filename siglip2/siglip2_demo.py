@@ -30,6 +30,9 @@ def convert_npz_to_transformers_dir(model_path, output_dir=None):
     if all((output_dir / filename).exists() for filename in required_files):
         print(f"Using converted Transformers model: {output_dir}")
         return str(output_dir)
+    missing_files = [filename for filename in required_files if not (output_dir / filename).exists()]
+    if output_dir.exists():
+        print(f"Converted model directory is incomplete; missing: {missing_files}")
 
     converter_path = Path(__file__).with_name("convert_siglip2_npz_to_hf.py")
     spec = importlib.util.spec_from_file_location("convert_siglip2_npz_to_hf", converter_path)
