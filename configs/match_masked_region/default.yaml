@@ -12,6 +12,7 @@ target_grid: null
 
 mask_threshold: 0.5
 top_percentile: 90.0
+score_threshold: null
 reverse_temperature: 0.07
 reverse_batch_size: 1024
 alpha: 0.55

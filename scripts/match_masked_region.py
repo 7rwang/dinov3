@@ -191,20 +191,31 @@ def save_heatmap(sim_map: np.ndarray, save_path: Path, cmap: str, dpi: int, titl
     print(f"Saved heatmap to {save_path}")
 
 
+def save_normalized_heatmap(sim_map: np.ndarray, save_path: Path, cmap: str, dpi: int, title: str) -> None:
+    save_heatmap(normalize_map(sim_map), save_path, cmap, dpi, title)
+
+
 def save_overlay(
     sim_map: np.ndarray,
     target_image_path: str,
     save_path: Path,
     percentile: float,
+    score_threshold: Optional[float],
     alpha: float,
     cmap: str,
-) -> float:
+) -> tuple[float, str]:
     save_path.parent.mkdir(parents=True, exist_ok=True)
     target = Image.open(target_image_path).convert("RGB")
     target_array = np.asarray(target, dtype=np.float32) / 255.0
     target_h, target_w = target_array.shape[:2]
 
-    cutoff = float(np.percentile(sim_map, percentile))
+    if score_threshold is None:
+        cutoff = float(np.percentile(sim_map, percentile))
+        threshold_type = f"percentile_{percentile:g}"
+    else:
+        cutoff = float(score_threshold)
+        threshold_type = "score_threshold"
+
     selected = resize_binary_map(sim_map >= cutoff, (target_h, target_w))
     sim_resized = resize_normalized_map(sim_map, (target_h, target_w))
 
@@ -215,7 +226,7 @@ def save_overlay(
 
     Image.fromarray((np.clip(overlay, 0.0, 1.0) * 255).astype(np.uint8)).save(save_path)
     print(f"Saved target overlay to {save_path}")
-    return cutoff
+    return cutoff, threshold_type
 
 
 def save_raw_outputs(
@@ -225,6 +236,7 @@ def save_raw_outputs(
     reverse_map: np.ndarray,
     ref_mask: np.ndarray,
     cutoff: float,
+    threshold_type: str,
 ) -> None:
     raw_path = save_path.with_suffix(".npz")
     np.savez_compressed(
@@ -234,6 +246,7 @@ def save_raw_outputs(
         reverse_affordance_probability=reverse_map,
         ref_mask=ref_mask,
         overlay_cutoff=cutoff,
+        overlay_threshold_type=threshold_type,
     )
     print(f"Saved raw outputs to {raw_path}")
 
@@ -260,13 +273,37 @@ def run_match(args) -> None:
     forward_heatmap_path = save_prefix.with_name(f"{save_prefix.name}_forward_heatmap.png")
     reverse_heatmap_path = save_prefix.with_name(f"{save_prefix.name}_reverse_consistency_heatmap.png")
     heatmap_path = save_prefix.with_name(f"{save_prefix.name}_heatmap.png")
+    normalized_heatmap_path = save_prefix.with_name(f"{save_prefix.name}_heatmap_normalized.png")
     overlay_path = save_prefix.with_name(f"{save_prefix.name}_overlay.png")
 
     save_heatmap(forward_map, forward_heatmap_path, args.cmap, args.dpi, "Forward Reference-to-Target Similarity")
     save_heatmap(reverse_map, reverse_heatmap_path, args.cmap, args.dpi, "Reverse Consistency Probability")
     save_heatmap(correspondence_map, heatmap_path, args.cmap, args.dpi, "Functional Correspondence Score")
-    cutoff = save_overlay(correspondence_map, args.target_image, overlay_path, args.top_percentile, args.alpha, args.cmap)
-    save_raw_outputs(save_prefix.with_suffix(".png"), correspondence_map, forward_map, reverse_map, ref_mask, cutoff)
+    save_normalized_heatmap(
+        correspondence_map,
+        normalized_heatmap_path,
+        args.cmap,
+        args.dpi,
+        "Functional Correspondence Score (Normalized)",
+    )
+    cutoff, threshold_type = save_overlay(
+        correspondence_map,
+        args.target_image,
+        overlay_path,
+        args.top_percentile,
+        args.score_threshold,
+        args.alpha,
+        args.cmap,
+    )
+    save_raw_outputs(
+        save_prefix.with_suffix(".png"),
+        correspondence_map,
+        forward_map,
+        reverse_map,
+        ref_mask,
+        cutoff,
+        threshold_type,
+    )
 
     print(f"Reference feature shape: {ref_feature.shape}")
     print(f"Target feature shape: {target_feature.shape}")
@@ -276,7 +313,7 @@ def run_match(args) -> None:
     print(f"Forward similarity range: [{forward_map.min():.6f}, {forward_map.max():.6f}]")
     print(f"Reverse consistency range: [{reverse_map.min():.6f}, {reverse_map.max():.6f}]")
     print(f"Correspondence range: [{correspondence_map.min():.6f}, {correspondence_map.max():.6f}]")
-    print(f"Overlay percentile cutoff: {cutoff:.6f}")
+    print(f"Overlay threshold ({threshold_type}): {cutoff:.6f}")
 
 
 def build_legacy_parser() -> argparse.ArgumentParser:
@@ -293,6 +330,8 @@ def build_legacy_parser() -> argparse.ArgumentParser:
                         help="Threshold after resizing the mask to patch grid")
     parser.add_argument("--top-percentile", type=float, default=90.0,
                         help="Overlay target pixels whose similarity is in this percentile or higher")
+    parser.add_argument("--score-threshold", type=float,
+                        help="Overlay target pixels whose raw correspondence score is at least this value")
     parser.add_argument("--reverse-temperature", type=float, default=0.07,
                         help="Softmax temperature for reverse target-to-reference matching")
     parser.add_argument("--reverse-batch-size", type=int, default=1024,
