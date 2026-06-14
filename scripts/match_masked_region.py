@@ -93,6 +93,59 @@ def compute_similarity(
     return (target_norm @ query.T).reshape(-1)
 
 
+def softmax(values: np.ndarray, axis: int = -1) -> np.ndarray:
+    shifted = values - values.max(axis=axis, keepdims=True)
+    exp_values = np.exp(shifted)
+    return exp_values / np.maximum(exp_values.sum(axis=axis, keepdims=True), 1e-12)
+
+
+def compute_reverse_affordance_probability(
+    ref_feature: np.ndarray,
+    target_feature: np.ndarray,
+    ref_mask: np.ndarray,
+    temperature: float,
+    batch_size: int,
+) -> np.ndarray:
+    """For each target patch, compute probability mass assigned back to the reference affordance mask."""
+    if temperature <= 0:
+        raise ValueError("--reverse-temperature must be > 0")
+    if batch_size <= 0:
+        raise ValueError("--reverse-batch-size must be > 0")
+
+    ref_norm = l2_normalize(ref_feature)
+    target_norm = l2_normalize(target_feature)
+    ref_mask_flat = ref_mask.reshape(-1)
+    probabilities = np.empty(target_norm.shape[0], dtype=np.float32)
+
+    for start in range(0, target_norm.shape[0], batch_size):
+        end = min(start + batch_size, target_norm.shape[0])
+        reverse_logits = (target_norm[start:end] @ ref_norm.T) / temperature
+        reverse_probs = softmax(reverse_logits, axis=1)
+        probabilities[start:end] = reverse_probs[:, ref_mask_flat].sum(axis=1)
+
+    return probabilities
+
+
+def compute_functional_correspondence(
+    ref_feature: np.ndarray,
+    target_feature: np.ndarray,
+    ref_mask: np.ndarray,
+    reverse_temperature: float,
+    reverse_batch_size: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Combine forward reference matching with reverse consistency into a stable correspondence score."""
+    forward_similarity = compute_similarity(ref_feature, target_feature, ref_mask)
+    reverse_probability = compute_reverse_affordance_probability(
+        ref_feature,
+        target_feature,
+        ref_mask,
+        reverse_temperature,
+        reverse_batch_size,
+    )
+    correspondence = normalize_map(forward_similarity) * reverse_probability
+    return forward_similarity, reverse_probability, correspondence
+
+
 def normalize_map(values: np.ndarray) -> np.ndarray:
     min_value = float(values.min())
     max_value = float(values.max())
@@ -116,12 +169,12 @@ def resize_binary_map(values: np.ndarray, size_hw: Tuple[int, int]) -> np.ndarra
     return np.asarray(image, dtype=np.uint8) > 0
 
 
-def save_heatmap(sim_map: np.ndarray, save_path: Path, cmap: str, dpi: int) -> None:
+def save_heatmap(sim_map: np.ndarray, save_path: Path, cmap: str, dpi: int, title: str) -> None:
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(6, 6))
     plt.imshow(sim_map, cmap=cmap, interpolation="nearest")
-    plt.colorbar(label="Cosine similarity", shrink=0.8)
-    plt.title("Target Similarity Heatmap")
+    plt.colorbar(shrink=0.8)
+    plt.title(title)
     plt.axis("off")
     plt.tight_layout()
     plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
@@ -156,9 +209,23 @@ def save_overlay(
     return cutoff
 
 
-def save_raw_outputs(save_path: Path, sim_map: np.ndarray, ref_mask: np.ndarray, cutoff: float) -> None:
+def save_raw_outputs(
+    save_path: Path,
+    correspondence_map: np.ndarray,
+    forward_map: np.ndarray,
+    reverse_map: np.ndarray,
+    ref_mask: np.ndarray,
+    cutoff: float,
+) -> None:
     raw_path = save_path.with_suffix(".npz")
-    np.savez_compressed(raw_path, similarity=sim_map, ref_mask=ref_mask, overlay_cutoff=cutoff)
+    np.savez_compressed(
+        raw_path,
+        correspondence=correspondence_map,
+        forward_similarity=forward_map,
+        reverse_affordance_probability=reverse_map,
+        ref_mask=ref_mask,
+        overlay_cutoff=cutoff,
+    )
     print(f"Saved raw outputs to {raw_path}")
 
 
@@ -176,6 +243,10 @@ def main() -> None:
                         help="Threshold after resizing the mask to patch grid")
     parser.add_argument("--top-percentile", type=float, default=90.0,
                         help="Overlay target pixels whose similarity is in this percentile or higher")
+    parser.add_argument("--reverse-temperature", type=float, default=0.07,
+                        help="Softmax temperature for reverse target-to-reference matching")
+    parser.add_argument("--reverse-batch-size", type=int, default=1024,
+                        help="Number of target patches per reverse-consistency batch")
     parser.add_argument("--alpha", type=float, default=0.55, help="Overlay opacity")
     parser.add_argument("--cmap", default="magma", help="Matplotlib colormap")
     parser.add_argument("--save-prefix", required=True, help="Output prefix, without extension")
@@ -188,23 +259,37 @@ def main() -> None:
     target_grid = infer_grid(target_feature.shape[0], args.target_grid)
     ref_mask = load_mask(args.ref_mask, ref_grid, args.mask_threshold)
 
-    similarity = compute_similarity(ref_feature, target_feature, ref_mask)
-    sim_map = similarity.reshape(target_grid)
+    forward_similarity, reverse_probability, correspondence = compute_functional_correspondence(
+        ref_feature,
+        target_feature,
+        ref_mask,
+        args.reverse_temperature,
+        args.reverse_batch_size,
+    )
+    forward_map = forward_similarity.reshape(target_grid)
+    reverse_map = reverse_probability.reshape(target_grid)
+    correspondence_map = correspondence.reshape(target_grid)
 
     save_prefix = Path(args.save_prefix)
+    forward_heatmap_path = save_prefix.with_name(f"{save_prefix.name}_forward_heatmap.png")
+    reverse_heatmap_path = save_prefix.with_name(f"{save_prefix.name}_reverse_consistency_heatmap.png")
     heatmap_path = save_prefix.with_name(f"{save_prefix.name}_heatmap.png")
     overlay_path = save_prefix.with_name(f"{save_prefix.name}_overlay.png")
 
-    save_heatmap(sim_map, heatmap_path, args.cmap, args.dpi)
-    cutoff = save_overlay(sim_map, args.target_image, overlay_path, args.top_percentile, args.alpha, args.cmap)
-    save_raw_outputs(save_prefix.with_suffix(".png"), sim_map, ref_mask, cutoff)
+    save_heatmap(forward_map, forward_heatmap_path, args.cmap, args.dpi, "Forward Reference-to-Target Similarity")
+    save_heatmap(reverse_map, reverse_heatmap_path, args.cmap, args.dpi, "Reverse Consistency Probability")
+    save_heatmap(correspondence_map, heatmap_path, args.cmap, args.dpi, "Functional Correspondence Score")
+    cutoff = save_overlay(correspondence_map, args.target_image, overlay_path, args.top_percentile, args.alpha, args.cmap)
+    save_raw_outputs(save_prefix.with_suffix(".png"), correspondence_map, forward_map, reverse_map, ref_mask, cutoff)
 
     print(f"Reference feature shape: {ref_feature.shape}")
     print(f"Target feature shape: {target_feature.shape}")
     print(f"Reference grid: {ref_grid[0]} x {ref_grid[1]}")
     print(f"Target grid: {target_grid[0]} x {target_grid[1]}")
     print(f"Reference selected patches: {int(ref_mask.sum())}")
-    print(f"Similarity range: [{sim_map.min():.6f}, {sim_map.max():.6f}]")
+    print(f"Forward similarity range: [{forward_map.min():.6f}, {forward_map.max():.6f}]")
+    print(f"Reverse consistency range: [{reverse_map.min():.6f}, {reverse_map.max():.6f}]")
+    print(f"Correspondence range: [{correspondence_map.min():.6f}, {correspondence_map.max():.6f}]")
     print(f"Overlay percentile cutoff: {cutoff:.6f}")
 
 
