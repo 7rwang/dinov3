@@ -114,9 +114,12 @@ def compute_reverse_affordance_probability(
     ref_mask: np.ndarray,
     temperature: float,
     batch_size: int,
+    mode: str,
 ) -> np.ndarray:
     """For each target patch, compute probability mass assigned back to the reference affordance mask."""
-    if temperature <= 0:
+    if mode not in {"top1", "softmax"}:
+        raise ValueError("--reverse-mode must be one of: top1, softmax")
+    if mode == "softmax" and temperature <= 0:
         raise ValueError("--reverse-temperature must be > 0")
     if batch_size <= 0:
         raise ValueError("--reverse-batch-size must be > 0")
@@ -128,9 +131,14 @@ def compute_reverse_affordance_probability(
 
     for start in range(0, target_norm.shape[0], batch_size):
         end = min(start + batch_size, target_norm.shape[0])
-        reverse_logits = (target_norm[start:end] @ ref_norm.T) / temperature
-        reverse_probs = softmax(reverse_logits, axis=1)
-        probabilities[start:end] = reverse_probs[:, ref_mask_flat].sum(axis=1)
+        reverse_similarity = target_norm[start:end] @ ref_norm.T
+        if mode == "top1":
+            top1_ref_indices = reverse_similarity.argmax(axis=1)
+            probabilities[start:end] = ref_mask_flat[top1_ref_indices].astype(np.float32)
+        else:
+            reverse_logits = reverse_similarity / temperature
+            reverse_probs = softmax(reverse_logits, axis=1)
+            probabilities[start:end] = reverse_probs[:, ref_mask_flat].sum(axis=1)
 
     return probabilities
 
@@ -141,6 +149,7 @@ def compute_functional_correspondence(
     ref_mask: np.ndarray,
     reverse_temperature: float,
     reverse_batch_size: int,
+    reverse_mode: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Combine forward reference matching with reverse consistency into a stable correspondence score."""
     forward_similarity = compute_similarity(ref_feature, target_feature, ref_mask)
@@ -150,6 +159,7 @@ def compute_functional_correspondence(
         ref_mask,
         reverse_temperature,
         reverse_batch_size,
+        reverse_mode,
     )
     correspondence = normalize_map(forward_similarity) * reverse_probability
     return forward_similarity, reverse_probability, correspondence
@@ -251,6 +261,7 @@ def run_match(args) -> None:
         ref_mask,
         args.reverse_temperature,
         args.reverse_batch_size,
+        args.reverse_mode,
     )
     forward_map = forward_similarity.reshape(target_grid)
     reverse_map = reverse_probability.reshape(target_grid)
@@ -295,6 +306,8 @@ def build_legacy_parser() -> argparse.ArgumentParser:
                         help="Overlay target pixels whose similarity is in this percentile or higher")
     parser.add_argument("--reverse-temperature", type=float, default=0.07,
                         help="Softmax temperature for reverse target-to-reference matching")
+    parser.add_argument("--reverse-mode", choices=["top1", "softmax"], default="top1",
+                        help="Reverse consistency mode: top1 uses hard nearest ref patch; softmax sums mask probability")
     parser.add_argument("--reverse-batch-size", type=int, default=1024,
                         help="Number of target patches per reverse-consistency batch")
     parser.add_argument("--alpha", type=float, default=0.55, help="Overlay opacity")
