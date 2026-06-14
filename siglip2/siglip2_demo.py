@@ -20,6 +20,7 @@ import torch.nn.functional as F
 DEFAULT_HF_MODEL = "google/siglip2-so400m-patch14-384"
 DEFAULT_NPZ_MODEL = "/nas/qirui/dinov3/siglip2/siglip2_g-opt16_384.npz"
 DEFAULT_HEATMAP_OUTPUT_DIR = "/nas/qirui/dinov3/outputs/siglip2_heatmaps"
+DEFAULT_TEXTS = ["a cat", "a dog", "a bird", "a car", "a person"]
 
 def convert_npz_to_transformers_dir(model_path, output_dir=None):
     checkpoint_path = Path(model_path)
@@ -381,7 +382,7 @@ def demo_from_local(
     print(f"Loading local image: {image_path}")
     image = Image.open(image_path)
 
-    scoring_texts = list(texts)
+    scoring_texts = list(texts or ([] if target_text else DEFAULT_TEXTS))
     if target_text and target_text not in scoring_texts:
         scoring_texts.append(target_text)
     for text in negative_texts or []:
@@ -535,8 +536,7 @@ def main():
     parser = argparse.ArgumentParser(description="SigLIP2 Demo")
     parser.add_argument("--image_url", type=str, help="图像URL")
     parser.add_argument("--image_path", type=str, help="本地图像路径")
-    parser.add_argument("--texts", type=str, nargs="+", 
-                       default=["a cat", "a dog", "a bird", "a car", "a person"],
+    parser.add_argument("--texts", type=str, nargs="+",
                        help="文本描述列表")
     parser.add_argument("--model_path", type=str, 
                        default=DEFAULT_NPZ_MODEL,
@@ -571,7 +571,7 @@ def main():
     
     # 运行演示
     if args.image_url:
-        demo_from_url(model, processor, device, args.image_url, args.texts)
+        demo_from_url(model, processor, device, args.image_url, args.texts or DEFAULT_TEXTS)
     elif args.image_path:
         demo_from_local(
             model,
@@ -593,7 +593,7 @@ def main():
         # 默认演示
         print("运行默认演示...")
         default_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
-        demo_from_url(model, processor, device, default_url, args.texts)
+        demo_from_url(model, processor, device, default_url, args.texts or DEFAULT_TEXTS)
 
 if __name__ == "__main__":
     main()
