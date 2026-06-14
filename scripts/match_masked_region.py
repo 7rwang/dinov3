@@ -208,15 +208,20 @@ def save_overlay(
     target = Image.open(target_image_path).convert("RGB")
     target_array = np.asarray(target, dtype=np.float32) / 255.0
     target_h, target_w = target_array.shape[:2]
+    sim_normalized = normalize_map(sim_map)
 
     if score_threshold is None:
         cutoff = float(np.percentile(sim_map, percentile))
         threshold_type = f"percentile_{percentile:g}"
+        selected_grid = sim_map >= cutoff
     else:
+        if not 0.0 <= score_threshold <= 1.0:
+            raise ValueError("--score-threshold must be in [0, 1] because it is applied to the normalized heatmap")
         cutoff = float(score_threshold)
-        threshold_type = "score_threshold"
+        threshold_type = "normalized_score_threshold"
+        selected_grid = sim_normalized >= cutoff
 
-    selected = resize_binary_map(sim_map >= cutoff, (target_h, target_w))
+    selected = resize_binary_map(selected_grid, (target_h, target_w))
     sim_resized = resize_normalized_map(sim_map, (target_h, target_w))
 
     colormap = plt.get_cmap(cmap)
@@ -331,7 +336,7 @@ def build_legacy_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-percentile", type=float, default=90.0,
                         help="Overlay target pixels whose similarity is in this percentile or higher")
     parser.add_argument("--score-threshold", type=float,
-                        help="Overlay target pixels whose raw correspondence score is at least this value")
+                        help="Overlay target pixels whose normalized correspondence score is at least this value")
     parser.add_argument("--reverse-temperature", type=float, default=0.07,
                         help="Softmax temperature for reverse target-to-reference matching")
     parser.add_argument("--reverse-batch-size", type=int, default=1024,
