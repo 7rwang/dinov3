@@ -5,12 +5,21 @@
 # the terms of the DINOv3 License Agreement.
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+
+try:
+    import hydra
+    from omegaconf import DictConfig, OmegaConf
+except ModuleNotFoundError:
+    hydra = None
+    DictConfig = None
+    OmegaConf = None
 
 
 def load_patch_feature(path: str, image_name: Optional[str] = None) -> np.ndarray:
@@ -229,30 +238,7 @@ def save_raw_outputs(
     print(f"Saved raw outputs to {raw_path}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Match a masked reference DINOv3 region in a target feature map")
-    parser.add_argument("--ref-feature", required=True, help="Reference patch feature .npy/.npz")
-    parser.add_argument("--target-feature", required=True, help="Target patch feature .npy/.npz")
-    parser.add_argument("--ref-mask", required=True, help="RGB/grayscale/alpha mask for the reference image")
-    parser.add_argument("--target-image", required=True, help="Target RGB image for overlay visualization")
-    parser.add_argument("--ref-image-name", help="Image key for reference .npz files")
-    parser.add_argument("--target-image-name", help="Image key for target .npz files")
-    parser.add_argument("--ref-grid", help="Reference patch grid as HxW, for example 160x160")
-    parser.add_argument("--target-grid", help="Target patch grid as HxW, for example 160x160")
-    parser.add_argument("--mask-threshold", type=float, default=0.5,
-                        help="Threshold after resizing the mask to patch grid")
-    parser.add_argument("--top-percentile", type=float, default=90.0,
-                        help="Overlay target pixels whose similarity is in this percentile or higher")
-    parser.add_argument("--reverse-temperature", type=float, default=0.07,
-                        help="Softmax temperature for reverse target-to-reference matching")
-    parser.add_argument("--reverse-batch-size", type=int, default=1024,
-                        help="Number of target patches per reverse-consistency batch")
-    parser.add_argument("--alpha", type=float, default=0.55, help="Overlay opacity")
-    parser.add_argument("--cmap", default="magma", help="Matplotlib colormap")
-    parser.add_argument("--save-prefix", required=True, help="Output prefix, without extension")
-    parser.add_argument("--dpi", type=int, default=300)
-    args = parser.parse_args()
-
+def run_match(args) -> None:
     ref_feature = load_patch_feature(args.ref_feature, args.ref_image_name)
     target_feature = load_patch_feature(args.target_feature, args.target_image_name)
     ref_grid = infer_grid(ref_feature.shape[0], args.ref_grid)
@@ -293,5 +279,59 @@ def main() -> None:
     print(f"Overlay percentile cutoff: {cutoff:.6f}")
 
 
+def build_legacy_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Match a masked reference DINOv3 region in a target feature map")
+    parser.add_argument("--ref-feature", required=True, help="Reference patch feature .npy/.npz")
+    parser.add_argument("--target-feature", required=True, help="Target patch feature .npy/.npz")
+    parser.add_argument("--ref-mask", required=True, help="RGB/grayscale/alpha mask for the reference image")
+    parser.add_argument("--target-image", required=True, help="Target RGB image for overlay visualization")
+    parser.add_argument("--ref-image-name", help="Image key for reference .npz files")
+    parser.add_argument("--target-image-name", help="Image key for target .npz files")
+    parser.add_argument("--ref-grid", help="Reference patch grid as HxW, for example 160x160")
+    parser.add_argument("--target-grid", help="Target patch grid as HxW, for example 160x160")
+    parser.add_argument("--mask-threshold", type=float, default=0.5,
+                        help="Threshold after resizing the mask to patch grid")
+    parser.add_argument("--top-percentile", type=float, default=90.0,
+                        help="Overlay target pixels whose similarity is in this percentile or higher")
+    parser.add_argument("--reverse-temperature", type=float, default=0.07,
+                        help="Softmax temperature for reverse target-to-reference matching")
+    parser.add_argument("--reverse-batch-size", type=int, default=1024,
+                        help="Number of target patches per reverse-consistency batch")
+    parser.add_argument("--alpha", type=float, default=0.55, help="Overlay opacity")
+    parser.add_argument("--cmap", default="magma", help="Matplotlib colormap")
+    parser.add_argument("--save-prefix", required=True, help="Output prefix, without extension")
+    parser.add_argument("--dpi", type=int, default=300)
+    return parser
+
+
+def legacy_main() -> None:
+    parser = build_legacy_parser()
+    run_match(parser.parse_args())
+
+
+def validate_hydra_config(cfg) -> None:
+    required = ["ref_feature", "target_feature", "ref_mask", "target_image", "save_prefix"]
+    missing = [name for name in required if not cfg.get(name)]
+    if missing:
+        raise ValueError(f"Missing required config values: {missing}")
+
+
+def _run_hydra_main() -> None:
+    if hydra is None:
+        raise ModuleNotFoundError("Hydra is required for config mode. Install hydra-core or use legacy -- arguments.")
+
+    @hydra.main(version_base=None, config_path="../configs/match_masked_region", config_name="default")
+    def hydra_main(cfg) -> None:
+        validate_hydra_config(cfg)
+        print("Hydra match_masked_region config:")
+        print(OmegaConf.to_yaml(cfg))
+        run_match(cfg)
+
+    hydra_main()
+
+
 if __name__ == "__main__":
-    main()
+    if any(arg.startswith("--") for arg in sys.argv[1:]):
+        legacy_main()
+    else:
+        _run_hydra_main()

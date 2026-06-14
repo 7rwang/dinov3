@@ -1,0 +1,26 @@
+exp:
+  name: default
+
+ref_feature: ""
+target_feature: ""
+ref_mask: ""
+target_image: ""
+ref_image_name: null
+target_image_name: null
+ref_grid: null
+target_grid: null
+
+mask_threshold: 0.5
+top_percentile: 90.0
+reverse_temperature: 0.07
+reverse_batch_size: 1024
+alpha: 0.55
+cmap: magma
+dpi: 300
+save_prefix: ${hydra:runtime.output_dir}/match
+
+hydra:
+  run:
+    dir: outputs/match_masked_region/${exp.name}/${now:%Y-%m-%d_%H-%M-%S}
+  job:
+    chdir: false
