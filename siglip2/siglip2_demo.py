@@ -118,6 +118,35 @@ def process_image_text(model, processor, device, image, texts):
 
     return scores.detach().cpu().numpy()
 
+def sigmoid_scalar(value: float) -> float:
+    """Numerically stable sigmoid for scalar display."""
+    return float(1.0 / (1.0 + np.exp(-value)))
+
+def print_target_margin(scores_by_text: dict[str, float], target_text: str, negative_texts: list[str]) -> None:
+    """Print target-vs-negative margin for using SigLIP2 as a text-conditioned score."""
+    if target_text not in scores_by_text:
+        raise ValueError(f"target_text was not scored: {target_text}")
+    if not negative_texts:
+        raise ValueError("--negative_texts is required when --target_text is provided")
+
+    missing = [text for text in negative_texts if text not in scores_by_text]
+    if missing:
+        raise ValueError(f"negative_texts were not scored: {missing}")
+
+    target_logit = float(scores_by_text[target_text])
+    negative_scores = [(text, float(scores_by_text[text])) for text in negative_texts]
+    best_negative_text, best_negative_logit = max(negative_scores, key=lambda item: item[1])
+    margin = target_logit - best_negative_logit
+
+    print("\n--- Target-vs-negative score ---")
+    print(f"target_text: {target_text}")
+    print(f"target_logit: {target_logit:.4f}")
+    print(f"target_prob: {sigmoid_scalar(target_logit):.4f}")
+    print(f"best_negative: {best_negative_text}")
+    print(f"best_negative_logit: {best_negative_logit:.4f}")
+    print(f"best_negative_prob: {sigmoid_scalar(best_negative_logit):.4f}")
+    print(f"text_margin: {margin:.4f}")
+
 def score_image_text_logits(model, processor, device, images, text):
     """Return SigLIP logits for one text against one or more images."""
     single_image = not isinstance(images, (list, tuple))
@@ -345,21 +374,34 @@ def demo_from_local(
     occlusion_batch_size=4,
     output_dir=None,
     save_name=None,
+    target_text=None,
+    negative_texts=None,
 ):
     """从本地文件加载图像并进行匹配"""
     print(f"Loading local image: {image_path}")
     image = Image.open(image_path)
-    
-    similarities = process_image_text(model, processor, device, image, texts)
+
+    scoring_texts = list(texts)
+    if target_text and target_text not in scoring_texts:
+        scoring_texts.append(target_text)
+    for text in negative_texts or []:
+        if text not in scoring_texts:
+            scoring_texts.append(text)
+
+    similarities = process_image_text(model, processor, device, image, scoring_texts)
+    scores_by_text = {text: float(score) for text, score in zip(scoring_texts, similarities)}
     
     print("\n--- 图像-文本匹配结果 ---")
-    for text, score in zip(texts, similarities):
-        print(f"{text}: {score.item():.4f}")
+    for text in scoring_texts:
+        print(f"{text}: {scores_by_text[text]:.4f}")
     
     # 找到最匹配的文本
     best_idx = np.argmax(similarities)
-    best_text = texts[best_idx]
-    print(f"\n最匹配的描述: '{best_text}' (得分: {similarities[best_idx].item():.4f})")
+    best_text = scoring_texts[best_idx]
+    print(f"\n最匹配的描述: '{best_text}' (得分: {scores_by_text[best_text]:.4f})")
+
+    if target_text:
+        print_target_margin(scores_by_text, target_text, list(negative_texts or []))
     
     # 生成热力图
     if generate_heatmap_flag:
@@ -517,6 +559,10 @@ def main():
                        help=f"热力图保存目录；默认 {DEFAULT_HEATMAP_OUTPUT_DIR}")
     parser.add_argument("--save_name", type=str,
                        help="热力图文件名；默认自动生成")
+    parser.add_argument("--target_text", type=str,
+                       help="目标文本；提供后会输出 target-vs-negative margin")
+    parser.add_argument("--negative_texts", type=str, nargs="*", default=[],
+                       help="负类/混淆文本列表，用于计算 target_text margin")
     
     args = parser.parse_args()
     
@@ -540,6 +586,8 @@ def main():
             occlusion_batch_size=args.occlusion_batch_size,
             output_dir=args.output_dir,
             save_name=args.save_name,
+            target_text=args.target_text,
+            negative_texts=args.negative_texts,
         )
     else:
         # 默认演示
